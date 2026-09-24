@@ -12,7 +12,7 @@ Endurance…) you want. erbuild works out exactly how to spend the rest of your 
 ## Install
 
 ```bash
-git clone https://github.com/<you>/erbuild.git
+git clone https://github.com/johnboerchers/erbuild.git
 cd erbuild
 pip install -e .
 ```
