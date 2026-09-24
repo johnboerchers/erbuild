@@ -34,6 +34,7 @@ import numpy as np
 from .calculator import (
     INEFFECTIVE_ATTRIBUTE_PENALTY,
     AttackRating,
+    attack_power,
     attack_rating,
     gets_two_handing_bonus,
     type_terms,
@@ -47,7 +48,9 @@ from .constants import (
     SCALING_ATTRIBUTES,
     AttackPowerType,
 )
-from .regulation import Weapon
+from .damage import HitDamage, bleed_flat_damage, damage_per_hit, hit_breakdown
+from .enemies import ATTACK_TYPES, Enemy
+from .regulation import Regulation, Weapon, load_default
 
 #: Two AR values closer than this are treated as equal (guards against float noise).
 TOLERANCE = 1e-9
@@ -257,6 +260,33 @@ def _backtrack(case: _Case, points: int) -> tuple[dict[str, int], int]:
 
 
 # ---------------------------------------------------------------------- public API
+def _as_class(starting_class: StartingClass | str) -> StartingClass:
+    return get_class(starting_class) if isinstance(starting_class, str) else starting_class
+
+
+def _budget(
+    starting_class: StartingClass,
+    level: int,
+    fixed: Mapping[str, int] | None,
+    minimum: Mapping[str, int] | None,
+) -> tuple[dict[str, int], dict[str, int], int]:
+    """Attribute bounds and the number of points left to spend above the lower bounds."""
+    lo, hi = attribute_bounds(starting_class, fixed, minimum)
+    total = level + LEVEL_OFFSET
+    budget = total - sum(lo.values())
+    if budget < 0:
+        raise ValueError(
+            f"Level {level} is too low: {starting_class.name} with these constraints "
+            f"needs at least level {sum(lo.values()) - LEVEL_OFFSET}"
+        )
+    if total > sum(hi.values()):
+        raise ValueError(
+            f"Level {level} is too high: with these fixed attributes the maximum is "
+            f"level {sum(hi.values()) - LEVEL_OFFSET}"
+        )
+    return lo, hi, budget
+
+
 def optimize(
     weapon: Weapon,
     starting_class: StartingClass | str,
@@ -282,23 +312,9 @@ def optimize(
         The Pareto frontier of AR vs. arcane-scaling status buildup. If the weapon has
         no such status, the frontier is a single build with the maximum AR.
     """
-    if isinstance(starting_class, str):
-        starting_class = get_class(starting_class)
+    starting_class = _as_class(starting_class)
     upgrade = weapon.max_upgrade if upgrade is None else upgrade
-    lo, hi = attribute_bounds(starting_class, fixed, minimum)
-
-    total = level + LEVEL_OFFSET
-    budget = total - sum(lo.values())
-    if budget < 0:
-        raise ValueError(
-            f"Level {level} is too low: {starting_class.name} with these constraints "
-            f"needs at least level {sum(lo.values()) - LEVEL_OFFSET}"
-        )
-    if total > sum(hi.values()):
-        raise ValueError(
-            f"Level {level} is too high: with these fixed attributes the maximum is "
-            f"level {sum(hi.values()) - LEVEL_OFFSET}"
-        )
+    lo, hi, budget = _budget(starting_class, level, fixed, minimum)
 
     cases = _build_cases(weapon, upgrade, two_handing, lo, hi, budget)
     arc_range = range(0, min(hi[_ARCANE] - lo[_ARCANE], budget) + 1)
@@ -360,3 +376,186 @@ def _pareto(builds: list[Build], status_types: tuple[AttackPowerType, ...]) -> l
         return strictly or j.attributes[_ARCANE] < i.attributes[_ARCANE]
 
     return [b for b in builds if not any(dominates(o, b) for o in builds if o is not b)]
+
+
+# ---------------------------------------------------------------------- vs. an enemy
+@dataclass(frozen=True)
+class EnemyBuild:
+    """A build scored against an enemy."""
+
+    build: Build
+    damage: HitDamage
+
+
+@dataclass(frozen=True)
+class EnemyOptimizationResult:
+    weapon: Weapon
+    upgrade: int
+    two_handing: bool
+    starting_class: StartingClass
+    level: int
+    enemy: Enemy
+    motion_value: float
+    attack_type: str
+    bleed_flat: float
+    #: The build with the most damage per hit against the enemy.
+    best: EnemyBuild
+    #: The highest-AR build, scored against the same enemy, for comparison.
+    highest_ar: EnemyBuild
+    #: "frontier" (single damage type) or "enumeration" (split damage).
+    method: str
+
+
+def optimize_vs_enemy(
+    weapon: Weapon,
+    starting_class: StartingClass | str,
+    level: int,
+    enemy: Enemy,
+    *,
+    upgrade: int | None = None,
+    two_handing: bool = False,
+    fixed: Mapping[str, int] | None = None,
+    minimum: Mapping[str, int] | None = None,
+    motion_value: float = 100.0,
+    attack_type: str = "standard",
+    bleed_flat: float | None = None,
+    regulation: Regulation | None = None,
+    method: str = "auto",
+) -> EnemyOptimizationResult:
+    """Find the allocation with the most damage per hit against one enemy.
+
+    Damage per hit is direct damage (each damage type through the enemy's defense and
+    negation) plus bleed averaged over the hits it takes to proc. See ``erbuild.damage``.
+
+    Args:
+        enemy: From ``load_enemies().get(...)``.
+        motion_value: The attack's motion value (100 = the weapon's full AR).
+        attack_type: Physical attack type: standard, strike, slash or pierce.
+        bleed_flat: Flat part of a bleed proc; defaults to 100 or 200 by weapon.
+        regulation: Used to decide the bleed flat amount (default: bundled data).
+        method: "auto", "frontier" or "enumeration". "auto" uses the AR frontier when
+            the weapon deals one damage type, where it's exact, and enumeration otherwise.
+    Other arguments are as for ``optimize``.
+    """
+    starting_class = _as_class(starting_class)
+    upgrade = weapon.max_upgrade if upgrade is None else upgrade
+    lo, hi, budget = _budget(starting_class, level, fixed, minimum)
+    if attack_type not in ATTACK_TYPES:
+        raise ValueError(f"attack_type must be one of {', '.join(ATTACK_TYPES)}")
+    if bleed_flat is None:
+        bleed_flat = bleed_flat_damage(weapon, regulation or load_default())
+
+    def score(build: Build) -> EnemyBuild:
+        values = build.rating.values
+        return EnemyBuild(
+            build, hit_breakdown(values, enemy, motion_value, attack_type, bleed_flat)
+        )
+
+    ar_result = optimize(
+        weapon, starting_class, level,
+        upgrade=upgrade, two_handing=two_handing, fixed=fixed, minimum=minimum,
+    )
+    terms = type_terms(weapon, upgrade)
+    damage_types = [t for t in terms if t.is_damage]
+    if method == "auto":
+        method = "frontier" if len(damage_types) <= 1 else "enumeration"
+
+    if method == "frontier":
+        # One damage type: for a fixed arcane value, bleed is fixed and damage rises
+        # with AR, so the best build against any enemy is on the AR frontier.
+        scored = [score(b) for b in ar_result.frontier]
+        top = max(s.damage.total for s in scored)
+        best = next(s for s in scored if s.damage.total >= top - TOLERANCE)
+    elif method == "enumeration":
+        def objective(values):
+            return damage_per_hit(values, enemy, motion_value, attack_type, bleed_flat)
+
+        bleed_matters = (
+            AttackPowerType.BLEED in terms
+            and enemy.resistance.get(AttackPowerType.BLEED) is not None
+        )
+        relevant = {a for t in damage_types for a in (*terms[t].scaling, *terms[t].requires)}
+        if bleed_matters:
+            bleed = terms[AttackPowerType.BLEED]
+            relevant |= {*bleed.scaling, *bleed.requires}
+        stats = [a for a in SCALING_ATTRIBUTES if a in relevant]
+        extra = _enumerate(weapon, upgrade, two_handing, lo, hi, budget, stats, objective)
+        attrs = dict(lo)
+        for a, z in extra.items():
+            attrs[a] += z
+        rating = attack_rating(weapon, attrs, upgrade, two_handing)
+        best = score(Build(attrs, rating, budget - sum(extra.values())))
+    else:
+        raise ValueError("method must be 'auto', 'frontier' or 'enumeration'")
+
+    return EnemyOptimizationResult(
+        weapon=weapon,
+        upgrade=upgrade,
+        two_handing=two_handing,
+        starting_class=starting_class,
+        level=level,
+        enemy=enemy,
+        motion_value=motion_value,
+        attack_type=attack_type,
+        bleed_flat=bleed_flat,
+        best=best,
+        highest_ar=score(ar_result.best),
+        method=method,
+    )
+
+
+def _enumerate(weapon, upgrade, two_handing, lo, hi, budget, stats, objective) -> dict[str, int]:
+    """Exhaustive search over allocations of `stats` that spend the whole usable budget.
+
+    The objective never decreases when a point is added, so some optimum spends
+    S = min(budget, room left in `stats`). Points that don't help are then trimmed back
+    (they become free points). Returns extra points per stat above its lower bound.
+    """
+    if not stats:
+        return {}
+    caps = [min(hi[a] - lo[a], budget) for a in stats]
+    spend = min(budget, sum(caps))
+
+    def evaluate(grid: np.ndarray) -> np.ndarray:
+        attrs = {a: lo[a] for a in SCALING_ATTRIBUTES}
+        for a, row in zip(stats, grid):
+            attrs[a] = lo[a] + row
+        values = attack_power(weapon, attrs, upgrade, two_handing)
+        return np.broadcast_to(objective(values), grid.shape[1:])
+
+    best_value, best_z = -np.inf, None
+    # Loop over the first stat; enumerate the middle stats; the last takes the rest.
+    for first in range(min(caps[0], spend) + 1):
+        middle = [np.arange(min(c, spend - first) + 1) for c in caps[1:-1]]
+        if len(stats) == 1:
+            if first != spend:
+                continue
+            grid = np.array([[first]])
+        else:
+            if middle:
+                mesh = np.array(np.meshgrid(*middle, indexing="ij")).reshape(len(middle), -1)
+            else:
+                mesh = np.zeros((0, 1), dtype=np.int64)
+            last = spend - first - mesh.sum(axis=0)
+            ok = (last >= 0) & (last <= caps[-1])
+            if not ok.any():
+                continue
+            grid = np.vstack([np.full((1, ok.sum()), first), mesh[:, ok], last[None, ok]])
+        values = evaluate(grid)
+        i = int(np.argmax(values))
+        if values[i] > best_value + TOLERANCE:
+            best_value, best_z = float(values[i]), grid[:, i].copy()
+
+    # Trim points that don't change the objective, so they show up as free points.
+    z = best_z.copy()
+    changed = True
+    while changed:
+        changed = False
+        for k in range(len(stats)):
+            if z[k] == 0:
+                continue
+            trial = z.copy()
+            trial[k] -= 1
+            if float(evaluate(trial[:, None])[0]) >= best_value - TOLERANCE:
+                z, changed = trial, True
+    return {a: int(v) for a, v in zip(stats, z)}

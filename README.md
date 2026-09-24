@@ -5,10 +5,10 @@
 You pick a starting class, a target level, a weapon, and how much Vigor (and Mind,
 Endurance…) you want. erbuild works out exactly how to spend the rest of your points.
 
-> **Status:** v0.2 adds the optimizer: exact AR-maximizing allocations, plus the
-> trade-off between AR and arcane status buildup (bleed, poison…). It's built on an
-> exact AR calculator validated against a reference implementation. See the
-> [roadmap](#roadmap).
+> **Status:** v0.3 optimizes against specific enemies: damage per hit through the
+> enemy's defenses, with bleed procs included. v0.2 added the exact AR optimizer and
+> the AR vs. arcane buildup trade-off, on top of an AR calculator validated against a
+> reference implementation. See the [roadmap](#roadmap).
 
 ## Install
 
@@ -82,6 +82,45 @@ $ erbuild classes
 Weapon names include the affinity (`"Heavy Claymore"`, `"Blood Uchigatana"`). If you
 misspell one, erbuild suggests close matches.
 
+### Against a specific enemy
+
+AR is what the equipment screen shows. Against a real enemy, defenses, damage
+negation and bleed resistance change which build is best. Download the enemy data
+once, then add `--enemy`:
+
+```console
+$ erbuild enemies update
+$ erbuild enemies search malenia
+Malenia, Goddess of Rot [Boss]                       18,473 HP   Miquella's Haligtree - Elphael
+Malenia, Blade of Miquella [Boss]                    18,473 HP   Miquella's Haligtree - Elphael
+
+$ erbuild optimize "Blood Uchigatana" --class samurai --level 150 --vig 60 \
+    --enemy "Malenia, Blade of Miquella [Boss]"
+Blood Uchigatana +25 (one-handed) [vanilla-v1.17]
+  Samurai, level 150 | fixed VIG 60
+  vs Malenia, Blade of Miquella [Boss] (Miquella's Haligtree - Elphael, NG) | MV 100, standard attack
+
+Most damage per hit: 891
+  VIG 60  MND 11  END 13  STR 30  DEX 56  INT 9  FAI 8  ARC 42  (0 free points)
+  AR 513 | direct 371 + bleed 520 (2080 per proc, every 4 hits)
+
+For comparison, the highest-AR build: 796 per hit (the build above does 12.0% more)
+  VIG 60  MND 11  END 13  STR 51  DEX 59  INT 9  FAI 8  ARC 18  (0 free points)
+  AR 522 | direct 380 + bleed 416 (2080 per proc, every 5 hits)
+```
+
+Enemy options (they also work with `erbuild ar` to score one build):
+
+- `--cycle ng+2` picks the journey (NG through NG+7).
+- `--location "castle"` picks a placement when an enemy appears in several places.
+- `--attack-type slash` sets the physical attack type (`standard`, `strike`, `slash`
+  or `pierce`); enemies have a separate defense and negation for each.
+- `--mv 130` sets the attack's motion value (default 100, the weapon's full AR).
+- `--bleed-flat 200` overrides the flat part of a bleed proc.
+
+`erbuild enemies show "Mohg, Lord of Blood [Boss]"` prints an enemy's HP, defenses,
+negations and resistances.
+
 ### Python
 
 ```python
@@ -96,6 +135,12 @@ print(result.best.attributes, result.best.ar)
 for build in result.frontier:          # Pareto frontier of AR vs. bleed
     print(build.ar, build.status, build.free_points)
 build = result.with_status_at_least(110)
+
+from erbuild import load_enemies, optimize_vs_enemy   # after `erbuild enemies update`
+
+malenia = load_enemies().get("Malenia, Blade of Miquella [Boss]", cycle=0)
+vs = optimize_vs_enemy(katana, "samurai", 150, malenia, fixed={"vig": 60}, attack_type="slash")
+print(vs.best.build.attributes, vs.best.damage.total, vs.best.damage.hits_to_proc)
 
 ar = attack_rating(katana, {"str": 12, "dex": 40, "arc": 50}, upgrade=25)
 print(ar.displayed)        # per-type AR as shown in game
@@ -163,6 +208,69 @@ Why not simply add each point where it helps most? Soft-cap curves start out
 convex and requirements create cliffs, so that greedy approach can get stuck on a
 worse build. The whole optimization takes a few milliseconds.
 
+## How damage against an enemy works
+
+For each damage type, the game compares your attack to the enemy's defense with the
+attack ratio $r = \mathrm{AR}_t \cdot \mathrm{MV} / \mathrm{Def}_t$ and applies a
+piecewise curve $m(r)$, from 10% at low ratios up to 90% at $r \ge 8$
+([details](https://eldenring.wiki.fextralife.com/Calculating+Damage)):
+
+| r | m(r) |
+|---|---|
+| < 0.125 | 0.10 |
+| 0.125 – 1 | 0.10 + (r − 0.125)² / 2.552 |
+| 1 – 2.5 | 0.70 − (2.5 − r)² / 7.5 |
+| 2.5 – 8 | 0.90 − (8 − r)² / 151.25 |
+| ≥ 8 | 0.90 |
+
+Damage per hit adds each type's $\mathrm{AR}_t \cdot \mathrm{MV} \cdot m(r) \cdot
+(1 - \text{negation}_t)$, plus bleed averaged over the hits it takes to proc:
+
+$$
+\text{bleed per hit} = \frac{\beta\,(0.15\,\mathrm{HP} + F)}{\lceil R / \text{buildup} \rceil}
+$$
+
+where $R$ is the enemy's bleed resistance and $\beta$ its incoming bleed multiplier
+(0.7 for most base-game bosses, 0.5 for Mohg and most DLC bosses). The flat part $F$ is
+200 for Reduvia, Morgott's Cursed Sword, Varre's Bouquet, Hoslow's Petal Whip and
+Blood-infused weapons with innate bleed, and 100 otherwise
+([source](https://eldenring.wiki.fextralife.com/Hemorrhage)).
+
+**Solving it.** For a weapon with one damage type, like Blood Uchigatana, the best
+build against *any* enemy lies on the AR vs. buildup frontier above. For a fixed arcane
+value, bleed is fixed and damage rises with AR. So erbuild just scores those builds.
+With split damage (e.g. physical + fire), each type passes through the defense curve
+separately and that shortcut no longer holds. erbuild then enumerates every
+allocation of the stats that matter. Damage never drops when you add a point, so only
+allocations that spend the whole budget need checking.
+
+### Simplifications
+
+Bleed is modeled more simply than the game handles it. Keep these in mind:
+
+- **Resistance rises after each proc.** The game raises an enemy's threshold after
+  every proc, via `ResistanceCorrectParam` (for one common profile: ×1.3, ×1.77,
+  ×2.44, ×4.0, then ×8.6). The enemy data doesn't say which profile each enemy uses,
+  so erbuild counts hits to the **first** proc. Over a long fight this overstates
+  bleed, and so can favor arcane more than it should.
+- **Buildup decay** between hits is ignored.
+- **Every hit applies the weapon's full buildup.** Some moves apply more or less.
+- **Other statuses deal no damage here.** Poison, scarlet rot and frost aren't
+  modeled yet; only bleed adds damage.
+- **Motion value and attack type are inputs.** They depend on the move, and the
+  default (MV 100, standard) is a reasonable baseline, not a specific attack.
+
+### Enemy data
+
+Enemy stats come from the community
+[Elden Ring PvE Enemy Health / Defense Data](https://docs.google.com/spreadsheets/d/1BVwmKqB8pvuyJkSTGYOM2kAJxFMQ0jVsc6aKYz_Upes/edit)
+sheet. It covers 3,254 enemy placements for every journey from NG to NG+7, derived
+from the game's params with each placement's area scaling applied. The sheet has no
+stated license, so erbuild **doesn't include it**. `erbuild enemies update` downloads
+it on your machine and saves a converted copy to `~/.cache/erbuild/enemies.json` (or
+`$ERBUILD_CACHE`, or `--enemy-data PATH`). All credit for the data goes to the sheet's
+authors.
+
 ## Validation
 
 `tests/fixtures/reference_ar.json` holds 3,000 randomized cases (random weapon, stats,
@@ -175,6 +283,11 @@ The optimizer is checked against brute-force enumeration of every allocation on
 200 random cases (weapons, classes, levels, grips, fixed and minimum attributes, with
 small budgets so enumeration is feasible): it must find the same best AR for every
 arcane value, spend the same minimum number of points, and return the same frontier.
+
+The enemy mode is checked the same way on 120 random cases with randomized enemies
+(defenses, negations, HP, bleed resistance, immunity), for both the frontier shortcut
+and full enumeration. Tests never download the real enemy data: they use a small
+synthetic workbook in the same format.
 
 ```bash
 pytest
@@ -200,7 +313,11 @@ erbuild --data src/erbuild/data/regulation-vanilla-v1.18.json ar "Uchigatana" --
 - [x] Starting classes and the level identity: level = Σ attributes − 79
 - [x] **Optimizer:** maximize AR given class, level, and fixed or minimum attributes
       (exact dynamic programming), with the AR vs. arcane buildup Pareto frontier
-- [ ] Damage against a specific enemy (defense and absorption), and bleed procs per hit
+- [x] Damage against a specific enemy (defense, negation, NG+ cycles) with bleed
+      procs per hit
+- [ ] Bleed after the first proc (per-enemy resistance growth), and poison/rot/frost damage
+- [ ] Per-move motion values and physical attack types
+- [ ] Optimizing against a set of enemies (weighted average or worst case)
 - [ ] Buffs and talismans as multipliers
 - [ ] Spell scaling for staves and seals
 - [ ] Web UI
@@ -210,6 +327,10 @@ erbuild --data src/erbuild/data/regulation-vanilla-v1.18.json ar "Uchigatana" --
 MIT. Regulation data and the core formula are derived from
 [elden-ring-weapon-calculator](https://github.com/ThomasJClark/elden-ring-weapon-calculator)
 by Tom Clark (MIT). See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+
+Enemy data is not included: `erbuild enemies update` downloads the community
+[Elden Ring PvE Enemy Health / Defense Data](https://docs.google.com/spreadsheets/d/1BVwmKqB8pvuyJkSTGYOM2kAJxFMQ0jVsc6aKYz_Upes/edit)
+sheet on your machine (see [Enemy data](#enemy-data)).
 
 Elden Ring is a trademark of FromSoftware / Bandai Namco. This is an unofficial fan
 project.

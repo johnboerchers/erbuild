@@ -26,5 +26,10 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
+Enemy data is not distributed with erbuild. The `erbuild enemies update` command
+downloads the community "Elden Ring PvE Enemy Health / Defense Data" Google Sheet
+(https://docs.google.com/spreadsheets/d/1BVwmKqB8pvuyJkSTGYOM2kAJxFMQ0jVsc6aKYz_Upes/edit)
+to the user's own machine. All credit for that data belongs to its authors.
+
 Elden Ring and all related game data are the property of FromSoftware, Inc. and
 Bandai Namco Entertainment. This project is not affiliated with or endorsed by them.
