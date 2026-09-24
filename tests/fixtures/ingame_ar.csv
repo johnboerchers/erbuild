@@ -1,0 +1,6 @@
+# Attack rating values read directly from the in-game equipment screen.
+# Add a row per screenshot: attributes are the values shown on the status screen
+# (before any buffs), two_handing is true/false, and damage columns are the totals
+# shown for each type (base + scaling bonus). Leave a column blank if not applicable.
+# Please note the game patch in the notes column.
+weapon,upgrade,two_handing,str,dex,int,fai,arc,physical,magic,fire,lightning,holy,bleed,notes

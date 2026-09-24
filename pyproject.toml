@@ -1,0 +1,29 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "erbuild"
+version = "0.1.0"
+description = "Elden Ring attack rating calculator and stat allocation optimizer"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.10"
+dependencies = ["numpy>=1.24"]
+keywords = ["elden ring", "calculator", "optimization", "build planner"]
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "Topic :: Games/Entertainment",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=7"]
+
+[project.scripts]
+erbuild = "erbuild.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/erbuild"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
