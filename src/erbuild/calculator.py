@@ -18,7 +18,7 @@ Scalars work too.
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import numpy as np
 from numpy.typing import ArrayLike
@@ -56,6 +56,56 @@ def effective_attributes(
     return eff
 
 
+@dataclass(frozen=True)
+class TypeTerms:
+    """The pieces of AR_t for one attack power type at one upgrade level.
+
+    AR_t = base * (1 + sum_s scaling[s] * curve[stat_s]), or base * 0.6 if any
+    attribute in `requires` is below the weapon's requirement.
+    """
+
+    base: float
+    #: attribute -> effective scaling coefficient (kappa_{t,s} * S_s), nonzero only.
+    scaling: dict[str, float]
+    #: attributes whose unmet requirement penalizes this type.
+    requires: tuple[str, ...]
+    curve: np.ndarray = field(repr=False)
+
+
+def type_terms(weapon: Weapon, upgrade: int) -> dict[AttackPowerType, TypeTerms]:
+    """Decompose AR into per-type, per-attribute terms (types with base attack > 0 only)."""
+    if not 0 <= upgrade <= weapon.max_upgrade:
+        raise ValueError(f"{weapon.name} upgrade level must be 0..{weapon.max_upgrade}")
+
+    base = weapon.attack[upgrade]
+    scaling = weapon.attribute_scaling[upgrade]
+    base_scaling = weapon.attribute_scaling[0]
+    result: dict[AttackPowerType, TypeTerms] = {}
+
+    for t in (*DAMAGE_TYPES, *STATUS_TYPES):
+        b = base.get(t, 0.0)
+        if not b:
+            continue
+        correct = weapon.attack_element_correct.get(t, {})
+        coefficients: dict[str, float] = {}
+        requires: list[str] = []
+        for a in SCALING_ATTRIBUTES:
+            flag = correct.get(a)
+            if not flag:
+                continue
+            if a in weapon.requirements:
+                requires.append(a)
+            if flag is True:
+                s = scaling.get(a, 0.0)
+            else:  # numeric override, scaled by the upgrade growth of that attribute
+                s0 = base_scaling.get(a, 0.0)
+                s = flag * scaling.get(a, 0.0) / s0 if s0 else 0.0
+            if s:
+                coefficients[a] = s
+        result[t] = TypeTerms(b, coefficients, tuple(requires), weapon.curves[t])
+    return result
+
+
 def attack_power(
     weapon: Weapon,
     attributes: Mapping[str, ArrayLike],
@@ -67,8 +117,7 @@ def attack_power(
 
     Returns only the types the weapon actually has (base attack > 0 at this level).
     """
-    if not 0 <= upgrade <= weapon.max_upgrade:
-        raise ValueError(f"{weapon.name} upgrade level must be 0..{weapon.max_upgrade}")
+    terms = type_terms(weapon, upgrade)
 
     raw = {a: np.asarray(attributes.get(a, 1), dtype=np.int64) for a in SCALING_ATTRIBUTES}
     eff = effective_attributes(weapon, attributes, two_handing)
@@ -78,38 +127,20 @@ def attack_power(
 
     # Requirement check uses effective (two-handed) attributes.
     unmet = {a: eff[a] < req for a, req in weapon.requirements.items()}
-
-    base = weapon.attack[upgrade]
-    scaling = weapon.attribute_scaling[upgrade]
-    base_scaling = weapon.attribute_scaling[0]
+    shape = np.broadcast_shapes(*(v.shape for v in raw.values()))
     result: dict[AttackPowerType, np.ndarray] = {}
 
-    for t in (*DAMAGE_TYPES, *STATUS_TYPES):
-        b = base.get(t, 0.0)
-        if not b:
-            continue
-        correct = weapon.attack_element_correct.get(t, {})
+    for t, term in terms.items():
         # Two-handing only boosts damage scaling, not status buildup.
         stats = eff if t.is_damage else raw
-
-        total = np.ones(np.broadcast_shapes(*(v.shape for v in raw.values())), dtype=np.float64)
-        any_unmet = np.zeros(total.shape, dtype=bool)
-        for a in SCALING_ATTRIBUTES:
-            flag = correct.get(a)
-            if not flag:
-                continue
-            if a in unmet:
-                any_unmet = any_unmet | unmet[a]
-            if flag is True:
-                s = scaling.get(a, 0.0)
-            else:  # numeric override, scaled by the upgrade growth of that attribute
-                s0 = base_scaling.get(a, 0.0)
-                s = flag * scaling.get(a, 0.0) / s0 if s0 else 0.0
-            if s:
-                total = total + weapon.curves[t][stats[a]] * s
-
+        total = np.ones(shape, dtype=np.float64)
+        any_unmet = np.zeros(shape, dtype=bool)
+        for a in term.requires:
+            any_unmet = any_unmet | unmet[a]
+        for a, s in term.scaling.items():
+            total = total + term.curve[stats[a]] * s
         total = np.where(any_unmet, 1.0 - ineffective_penalty, total)
-        result[t] = b * total
+        result[t] = term.base * total
     return result
 
 
