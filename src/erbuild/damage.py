@@ -12,9 +12,12 @@ Bleed adds its proc damage, spread over the hits needed to trigger it:
 
     bleed per hit = multiplier * (0.15 * max HP + flat) / ceil(resistance / buildup)
 
-Simplifications (see the README): hits to the *first* proc only (the game raises the
-threshold after each proc), no buildup decay between hits, and every hit applies the
-weapon's full buildup.
+The bleed term is an average: the proc lands on the hit that fills the meter, and
+dividing by the hits per cycle spreads it over that cycle.
+
+Simplifications (see the README): the first proc's cycle length is used throughout
+(the game raises the threshold after each proc), no buildup decay between hits, every
+hit applies the weapon's full buildup, and poison, scarlet rot and frost add no damage.
 """
 
 from __future__ import annotations

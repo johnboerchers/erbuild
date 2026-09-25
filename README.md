@@ -195,9 +195,9 @@ build. See [web/README.md](web/README.md) to run it locally.
 For every attack power type $t$ (physical, magic, fire, lightning, holy, plus status
 buildup like bleed), a weapon at upgrade level $u$ has
 
-$$
+```math
 \mathrm{AR}_t = B_t(u)\left(1 + \sum_{s} m_{t,s}\, S_s(u)\, g_t(a_s)\right)
-$$
+```
 
 | Symbol | Meaning | Game param |
 |---|---|---|
@@ -225,13 +225,13 @@ fixes the total number of points. Each attribute has a lower bound $\ell_i$ (the
 class's base, raised by any minimum you set) and an upper bound $u_i$ (99, or equal
 to $\ell_i$ when you fix it). The problem is
 
-$$
+```math
 \begin{aligned}
 \max_{x \in \mathbb{Z}^8} \quad & f(x) = \sum_{t \in \text{damage types}} \mathrm{AR}_t(x) \\
 \text{subject to} \quad & \ell_i \le x_i \le u_i \quad \text{for every attribute } i, \\
 & \textstyle\sum_i x_i \le L + 79.
 \end{aligned}
-$$
+```
 
 The budget is an inequality because $f$ never decreases when you add a point, so
 nothing is lost by leaving points unspent. Unspent points are the *free points* in
@@ -249,27 +249,27 @@ on both AR and buildup.
 
 ### 3. Solving it
 
-Four properties of the problem decide how to solve it:
+**The problem is nearly separable.** Once you fix which requirements are met, AR is a
+constant plus one lookup table per attribute, $f(y) = C + \sum_s h_s(y_s)$. Maximizing
+a sum of per-attribute tables under a point budget is a *nonlinear integer knapsack*,
+which dynamic programming solves exactly. With $V_k(n)$ the best AR from the first $k$
+attributes using at most $n$ points:
 
-1. **It's nearly separable.** Once you fix which requirements are met, AR is a
-   constant plus one lookup table per attribute:
-   $f(y) = C + \sum_s h_s(y_s)$. Maximizing a sum of per-attribute tables under a point
-   budget is a *nonlinear integer knapsack*, which dynamic programming solves exactly:
+```math
+V_k(n) = \max_{0 \le y \le n} \big[\, h_k(y) + V_{k-1}(n - y) \,\big]
+```
 
-   $$
-   V_k(n) = \max_{0 \le y \le n} \big[\, h_k(y) + V_{k-1}(n - y) \,\big]
-   $$
+Three more properties shape how erbuild uses it:
 
-   where $V_k(n)$ is the best AR from the first $k$ attributes using at most $n$ points.
-2. **One DP gives the whole frontier.** Run the DP over STR, DEX, INT and FAI only.
+1. **One DP gives the whole frontier.** Run the DP over STR, DEX, INT and FAI only.
    The best AR at arcane value $a$ is then a single lookup:
    $\mathrm{AR}(a) = C + h_{\mathrm{arc}}(a) + V(N - a)$.
-3. **Requirements are the only coupling.** A requirement you don't meet removes a
+2. **Requirements are the only coupling.** A requirement you don't meet removes a
    type's scaling from *every* attribute. erbuild tries each combination of
    requirements met or unmet (at most $2^5 = 32$), restricts each attribute to the
    matching side of its requirement, and keeps the best. So it will leave a
    requirement unmet when that's genuinely better.
-4. **It isn't concave.** Soft-cap curves start out convex, requirements create
+3. **It isn't concave.** Soft-cap curves start out convex, requirements create
    cliffs, and two-handed STR moves in uneven steps. That's why the simple approach
    of adding each point where it helps most can get stuck on a worse build, and
    why erbuild uses the DP.
@@ -295,10 +295,10 @@ piecewise curve $m(r)$, from 10% at low ratios up to 90% at $r \ge 8$
 Damage per hit sums each type through the curve and the enemy's negation, then adds
 bleed averaged over the hits it takes to proc:
 
-$$
+```math
 f_{\text{enemy}}(x) = \sum_{t} \mathrm{MV} \cdot \mathrm{AR}_t(x) \cdot m(r_t) \cdot (1 - \text{neg}_t)
 \;+\; \frac{\beta\,(0.15\,\mathrm{HP} + F)}{\big\lceil R / \mathrm{buildup}(x) \big\rceil}
-$$
+```
 
 Here $R$ is the enemy's bleed resistance and $\beta$ its incoming bleed multiplier
 (0.7 for most base-game bosses, 0.5 for Mohg and most DLC bosses). The flat part $F$
@@ -306,6 +306,28 @@ is 200 for Reduvia, Morgott's Cursed Sword, Varre's Bouquet, Hoslow's Petal Whip
 Blood-infused weapons with innate bleed, and 100 otherwise
 ([source](https://eldenring.wiki.fextralife.com/Hemorrhage)). Physical damage uses
 the enemy's defense and negation for the attack's physical type.
+
+**Reading the bleed term.** Bleed adds nothing to the hits that fill the meter; the
+whole proc lands on the hit that fills it. erbuild spreads that proc over the cycle of
+hits it takes, which gives the *average* damage per hit. For the Blood Uchigatana
+build against Malenia above, each hit does 371 direct damage and bleed procs for
+2,080 on every 4th hit:
+
+| Hit | Direct | Bleed | Actual damage |
+|---|---:|---:|---:|
+| 1 | 371 | 0 | 371 |
+| 2 | 371 | 0 | 371 |
+| 3 | 371 | 0 | 371 |
+| 4 | 371 | 2,080 | 2,451 |
+| **Per 4 hits** | **1,484** | **2,080** | **3,564** |
+
+$3{,}564 / 4 = 891$ per hit, reported as 371 direct plus $2{,}080 / 4 = 520$ bleed. No
+single hit does 891; it's the rate over a repeating cycle, which is what matters for
+sustained damage, since total damage ≈ hits landed × damage per hit. The ceiling in
+$\lceil R / \mathrm{buildup} \rceil$ is there because a proc needs whole hits. This is
+also why the optimizer will trade some AR for bleed: cutting the cycle from 5 hits to
+4 raises bleed from a fifth of a proc per hit to a quarter (416 → 520 against
+Malenia), which outweighs losing 9 AR.
 
 **Solving it.** For a weapon with one damage type, like Blood Uchigatana, the best
 build against *any* enemy lies on the AR-vs-buildup frontier from section 2. For a
@@ -320,15 +342,20 @@ when you add a point, it only has to check allocations that spend the whole budg
 
 Bleed is modeled more simply than the game handles it. Keep these in mind:
 
+- **Bleed is an average, not a hit-by-hit simulation.** In a short fight, bleed may
+  never proc at all: if an enemy dies in 3 hits, the 4-hit cycle above never
+  completes, and maximizing direct damage would be the better choice.
 - **Resistance rises after each proc.** The game raises an enemy's threshold after
   every proc, via `ResistanceCorrectParam` (for one common profile: ×1.3, ×1.77,
   ×2.44, ×4.0, then ×8.6). The enemy data doesn't say which profile each enemy uses,
-  so erbuild counts hits to the **first** proc. Over a long fight this overstates
-  bleed, and so can favor arcane more than it should.
+  so erbuild uses the **first** proc's cycle length throughout. Over a long fight this
+  overstates bleed, and so can favor arcane more than it should.
 - **Buildup decay** between hits is ignored.
 - **Every hit applies the weapon's full buildup.** Some moves apply more or less.
-- **Other statuses deal no damage here.** Poison, scarlet rot and frost aren't
-  modeled; only bleed adds damage.
+- **Only bleed is counted as damage.** In the game, poison and scarlet rot also
+  damage enemies over time, and frost deals burst damage and makes the target take
+  more damage. erbuild's enemy mode doesn't model these yet, so builds that rely on
+  them are undervalued against enemies.
 - **Motion value and attack type are inputs.** They depend on the move, and the
   default (MV 100, standard) is a reasonable baseline, not a specific attack.
 

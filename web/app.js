@@ -364,7 +364,7 @@ function renderEnemyBest(target, out, vs, fixedStats) {
   children.push(...statBars(best.attributes, out.class_stats, fixedStats));
   if (best.damage.bleed_proc) {
     children.push(h("p", { class: "hint small" },
-      "Bleed counts hits to the first proc; the game raises resistance after each one. See the README."));
+      "Bleed is averaged per hit: the proc lands every few hits and is spread over that cycle, using the first proc's length. Poison, rot and frost aren't counted yet. See the README."));
   }
   fill(target, children);
   target.className = "card result-card";

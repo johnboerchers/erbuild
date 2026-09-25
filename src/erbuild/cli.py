@@ -35,7 +35,8 @@ from .enemies import (
 from .optimizer import Build, optimize, optimize_vs_enemy
 from .regulation import Regulation
 
-_BLEED_NOTE = "Bleed counts hits to the first proc; see the README for the simplifications."
+_BLEED_NOTE = ("Bleed is averaged over its proc cycle, using the first proc's length; "
+               "see the README for how it's modeled.")
 
 
 def _load(args: argparse.Namespace) -> Regulation:
