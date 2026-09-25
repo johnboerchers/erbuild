@@ -3,90 +3,170 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>erbuild</title>
-  <meta name="description" content="Elden Ring attack rating calculator and stat optimizer, running in your browser.">
+  <title>erbuild · Elden Ring stat optimizer</title>
+  <meta name="description" content="Exact attack rating and stat optimization for Elden Ring, computed in your browser.">
+  <meta name="theme-color" content="#100d0a">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cpath d='M16 2 19 13 30 16 19 19 16 30 13 19 2 16 13 13Z' fill='%23d6aa4f'/%3E%3C/svg%3E">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@500;600;700&family=Inter:wght@400;500;600&display=swap">
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
-  <header>
-    <h1>erbuild</h1>
-    <p class="tagline">Elden Ring attack rating, computed exactly, in your browser.</p>
-    <p id="status" class="status" role="status">Loading Python…</p>
+  <div class="glow" aria-hidden="true"></div>
+
+  <header class="topbar">
+    <a class="brand" href="./" aria-label="erbuild home">
+      <svg class="brand-mark" viewBox="0 0 32 32" aria-hidden="true"><path d="M16 2 19 13 30 16 19 19 16 30 13 19 2 16 13 13Z"/></svg>
+      <span>erbuild</span>
+    </a>
+    <nav class="tabs" role="tablist" aria-label="Mode">
+      <button role="tab" id="tab-optimizer" aria-selected="true" aria-controls="view-optimizer" data-mode="optimizer">Optimizer</button>
+      <button role="tab" id="tab-calculator" aria-selected="false" aria-controls="view-calculator" data-mode="calculator">Calculator</button>
+    </nav>
+    <p id="status" class="status-pill" role="status"><span class="dot"></span><span id="status-text">Summoning Python…</span></p>
   </header>
 
-  <main>
-    <form id="ar-form" class="panel" autocomplete="off" aria-busy="true">
-      <h2>Weapon</h2>
-      <label class="wide">Name (including affinity)
-        <input id="weapon" list="weapon-list" value="Blood Uchigatana" spellcheck="false" disabled>
-        <datalist id="weapon-list"></datalist>
-      </label>
-      <div class="row">
-        <label>Upgrade
-          <input id="upgrade" type="number" min="0" max="25" value="25" disabled>
-        </label>
-        <label class="check">
-          <input id="two-handing" type="checkbox" disabled> Two-handed
-        </label>
-      </div>
+  <section class="hero">
+    <h1>Spend every point <em>well</em>.</h1>
+    <p>Exact attack rating and stat optimization for Elden Ring, from the game's own data. Everything runs in your browser.</p>
+  </section>
 
-      <h2>Attributes</h2>
-      <div class="stats">
-        <label>STR <input id="str" type="number" min="1" max="99" value="12" disabled></label>
-        <label>DEX <input id="dex" type="number" min="1" max="99" value="40" disabled></label>
-        <label>INT <input id="int" type="number" min="1" max="99" value="10" disabled></label>
-        <label>FAI <input id="fai" type="number" min="1" max="99" value="10" disabled></label>
-        <label>ARC <input id="arc" type="number" min="1" max="99" value="50" disabled></label>
-      </div>
-    </form>
-
-    <section class="panel" aria-live="polite">
-      <h2>Attack rating</h2>
-      <div id="result" class="result muted">Waiting for Python to load…</div>
-    </section>
-
-    <section class="panel">
-      <h2>Against an enemy <span class="badge">experimental</span></h2>
-      <p class="muted">
-        Enemy stats come from the community
-        <a href="https://docs.google.com/spreadsheets/d/1BVwmKqB8pvuyJkSTGYOM2kAJxFMQ0jVsc6aKYz_Upes/edit" target="_blank" rel="noopener">Elden Ring PvE Enemy Health / Defense Data</a>
-        sheet. erbuild doesn't host it: your browser downloads it straight from Google (about 7 MB).
-      </p>
-      <button id="load-enemies" type="button" disabled>Download enemy data</button>
-      <div id="enemy-controls" hidden>
-        <label class="wide">Enemy
-          <input id="enemy" list="enemy-list" placeholder="e.g. Malenia, Blade of Miquella [Boss]" spellcheck="false">
-          <datalist id="enemy-list"></datalist>
+  <main class="layout">
+    <form id="controls" class="controls" autocomplete="off" aria-busy="true">
+      <section class="card">
+        <h2>Weapon</h2>
+        <label class="field">
+          <span>Name, including affinity</span>
+          <input id="weapon" list="weapon-list" value="Blood Uchigatana" spellcheck="false" disabled>
+          <datalist id="weapon-list"></datalist>
         </label>
-        <div class="row">
-          <label>Journey
-            <select id="cycle">
-              <option value="ng">NG</option><option value="ng+">NG+</option>
-              <option value="ng+2">NG+2</option><option value="ng+3">NG+3</option>
-              <option value="ng+4">NG+4</option><option value="ng+5">NG+5</option>
-              <option value="ng+6">NG+6</option><option value="ng+7">NG+7</option>
-            </select>
+        <div class="field">
+          <span class="field-row"><label for="upgrade">Upgrade</label><output id="upgrade-out" for="upgrade">+25</output></span>
+          <input id="upgrade" type="range" min="0" max="25" value="25" disabled>
+        </div>
+        <div class="segmented" role="radiogroup" aria-label="Grip">
+          <label><input type="radio" name="grip" value="one" checked disabled><span>One-handed</span></label>
+          <label><input type="radio" name="grip" value="two" disabled><span>Two-handed</span></label>
+        </div>
+      </section>
+
+      <section class="card" data-show="optimizer">
+        <h2>Character</h2>
+        <div class="grid-2">
+          <label class="field"><span>Starting class</span>
+            <select id="class" disabled></select>
           </label>
-          <label>Attack type
-            <select id="attack-type">
-              <option>standard</option><option>strike</option><option>slash</option><option>pierce</option>
-            </select>
-          </label>
-          <label>Location (if asked)
-            <input id="location" spellcheck="false">
+          <label class="field"><span>Target level</span>
+            <input id="level" type="number" min="1" max="713" value="150" inputmode="numeric" disabled>
           </label>
         </div>
-      </div>
-    </section>
+        <p class="hint">Fix the attributes you've decided on. Leave one blank to keep it at the class's base.</p>
+        <div class="grid-3">
+          <label class="field"><span>Vigor</span><input id="fix-vig" type="number" min="1" max="99" value="60" inputmode="numeric" disabled></label>
+          <label class="field"><span>Mind</span><input id="fix-mnd" type="number" min="1" max="99" inputmode="numeric" disabled></label>
+          <label class="field"><span>Endurance</span><input id="fix-end" type="number" min="1" max="99" inputmode="numeric" disabled></label>
+        </div>
+        <details class="more">
+          <summary>Minimum damage stats</summary>
+          <p class="hint">For example INT 20 to cast a sorcery. The optimizer won't go below these.</p>
+          <div class="grid-5">
+            <label class="field"><span>STR</span><input id="min-str" type="number" min="1" max="99" inputmode="numeric" disabled></label>
+            <label class="field"><span>DEX</span><input id="min-dex" type="number" min="1" max="99" inputmode="numeric" disabled></label>
+            <label class="field"><span>INT</span><input id="min-int" type="number" min="1" max="99" inputmode="numeric" disabled></label>
+            <label class="field"><span>FAI</span><input id="min-fai" type="number" min="1" max="99" inputmode="numeric" disabled></label>
+            <label class="field"><span>ARC</span><input id="min-arc" type="number" min="1" max="99" inputmode="numeric" disabled></label>
+          </div>
+        </details>
+      </section>
+
+      <section class="card" data-show="calculator" hidden>
+        <h2>Attributes</h2>
+        <div class="grid-5">
+          <label class="field"><span>STR</span><input id="str" type="number" min="1" max="99" value="12" inputmode="numeric" disabled></label>
+          <label class="field"><span>DEX</span><input id="dex" type="number" min="1" max="99" value="40" inputmode="numeric" disabled></label>
+          <label class="field"><span>INT</span><input id="int" type="number" min="1" max="99" value="10" inputmode="numeric" disabled></label>
+          <label class="field"><span>FAI</span><input id="fai" type="number" min="1" max="99" value="10" inputmode="numeric" disabled></label>
+          <label class="field"><span>ARC</span><input id="arc" type="number" min="1" max="99" value="50" inputmode="numeric" disabled></label>
+        </div>
+      </section>
+
+      <section class="card">
+        <h2>Enemy <span class="tag">optional</span></h2>
+        <p class="hint" id="enemy-intro">
+          Optimize for damage against a specific foe, bleed included. Enemy stats come from the community
+          <a href="https://docs.google.com/spreadsheets/d/1BVwmKqB8pvuyJkSTGYOM2kAJxFMQ0jVsc6aKYz_Upes/edit" target="_blank" rel="noopener">PvE Enemy Health / Defense Data</a>
+          sheet. Your browser downloads it from Google (about 7 MB); erbuild doesn't host it.
+        </p>
+        <button id="load-enemies" class="button" type="button" disabled>Download enemy data</button>
+        <div id="enemy-controls" hidden>
+          <label class="field">
+            <span>Enemy</span>
+            <input id="enemy" list="enemy-list" placeholder="Search, e.g. Malenia" spellcheck="false">
+            <datalist id="enemy-list"></datalist>
+          </label>
+          <div class="grid-2">
+            <label class="field"><span>Journey</span>
+              <select id="cycle">
+                <option value="ng">NG</option><option value="ng+">NG+</option>
+                <option value="ng+2">NG+2</option><option value="ng+3">NG+3</option>
+                <option value="ng+4">NG+4</option><option value="ng+5">NG+5</option>
+                <option value="ng+6">NG+6</option><option value="ng+7">NG+7</option>
+              </select>
+            </label>
+            <label class="field"><span>Attack type</span>
+              <select id="attack-type">
+                <option value="standard">Standard</option><option value="strike">Strike</option>
+                <option value="slash">Slash</option><option value="pierce">Pierce</option>
+              </select>
+            </label>
+            <label class="field"><span>Motion value</span>
+              <input id="mv" type="number" min="1" max="1000" value="100" inputmode="numeric">
+            </label>
+            <label class="field"><span>Location <small>(if asked)</small></span>
+              <input id="location" spellcheck="false">
+            </label>
+          </div>
+          <p class="hint small" id="enemy-cache-note"></p>
+        </div>
+      </section>
+    </form>
+
+    <div class="results">
+      <section id="view-optimizer" role="tabpanel" aria-labelledby="tab-optimizer" aria-live="polite">
+        <article class="card result-card placeholder" id="opt-summary">
+          <p class="eyebrow">Best build</p>
+          <p class="muted">Waiting for Python to load…</p>
+        </article>
+        <article class="card" id="opt-chart-card" hidden>
+          <header class="card-head">
+            <div>
+              <h2 id="chart-title">AR vs. bleed</h2>
+              <p class="hint" id="chart-sub"></p>
+            </div>
+            <button type="button" class="link-button" id="toggle-table" aria-expanded="false">Show table</button>
+          </header>
+          <div id="chart" class="chart"></div>
+          <div id="frontier-table" class="table-wrap" hidden></div>
+        </article>
+      </section>
+
+      <section id="view-calculator" role="tabpanel" aria-labelledby="tab-calculator" aria-live="polite" hidden>
+        <article class="card result-card" id="calc-summary">
+          <p class="eyebrow">Attack rating</p>
+          <p class="muted">Waiting for Python to load…</p>
+        </article>
+      </section>
+    </div>
   </main>
 
-  <footer>
+  <footer class="footer">
     <p>
       Weapon data from Tom Clark's
       <a href="https://github.com/ThomasJClark/elden-ring-weapon-calculator" target="_blank" rel="noopener">elden-ring-weapon-calculator</a>
-      (MIT). Unofficial fan project; Elden Ring is a trademark of FromSoftware / Bandai Namco.
+      (MIT). <a href="https://github.com/johnboerchers/erbuild" target="_blank" rel="noopener">Open source on GitHub</a>. Unofficial fan project; Elden Ring is a trademark of FromSoftware / Bandai Namco.
     </p>
-    <p id="timings" class="muted"></p>
+    <p id="timings" class="timings"></p>
   </footer>
 
   <script type="module" src="app.js"></script>

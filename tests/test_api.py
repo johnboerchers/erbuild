@@ -11,7 +11,7 @@ def enemy_api(enemy_workbook):
     summary = api.load_enemy_workbook(enemy_workbook.read_bytes())
     assert summary["placements"] == 3
     yield api
-    api._enemy_data = None
+    api._enemy_data = api._enemy_raw = None
 
 
 def test_catalog():
@@ -39,6 +39,7 @@ def test_optimize_frontier():
     out = api.optimize("Blood Uchigatana", "samurai", 150, fixed={"vig": 60})
     assert out["status_types"] == ["bleed"]
     assert out["best"]["ar"] == 522 and len(out["frontier"]) > 10
+    assert all(abs(b["raw_status"]["bleed"] - b["status"]["bleed"]) < 1 for b in out["frontier"])
     json.dumps(out)
 
 
@@ -58,3 +59,16 @@ def test_json_bridge():
     assert "Unknown method" in json.loads(api.call("nope"))["error"]
     assert "Bad arguments" in json.loads(api.call("optimize", json.dumps({"weapon": "Uchigatana"})))["error"]
     assert "Invalid JSON" in json.loads(api.call("classes", "{"))["error"]
+
+
+def test_enemy_data_round_trip(enemy_api):
+    saved = enemy_api.export_enemy_data()
+    enemy_api._enemy_data = enemy_api._enemy_raw = None
+    assert enemy_api.load_enemy_data(saved)["placements"] == 3
+    assert enemy_api.enemies("soldier")[0]["name"] == "Soldier"
+    assert "error" in enemy_api.load_enemy_data("{}")
+
+
+def test_optimize_includes_class_stats():
+    out = api.optimize("Uchigatana", "samurai", 60)
+    assert out["class_stats"]["dex"] == 15

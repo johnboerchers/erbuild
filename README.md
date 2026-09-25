@@ -151,11 +151,12 @@ dex = np.arange(15, 100)
 values = attack_power(katana, {"str": 12, "dex": dex, "arc": 50}, upgrade=25)
 ```
 
-### In the browser (prototype)
+### In the browser
 
-[`web/`](web/) holds a static page that runs erbuild in the browser via Pyodide,
-using the same Python code with no server. It currently covers the AR calculator and
-per-hit damage against enemies. See [web/README.md](web/README.md) to run it locally.
+[`web/`](web/) holds a static web app that runs erbuild in the browser via Pyodide:
+the same Python code, with no server. It has the optimizer (with an interactive AR
+vs. bleed chart), the AR calculator, and damage against enemies. See
+[web/README.md](web/README.md) to run it locally.
 
 ## How AR is calculated
 
@@ -326,7 +327,8 @@ erbuild --data src/erbuild/data/regulation-vanilla-v1.18.json ar "Uchigatana" --
 - [ ] Optimizing against a set of enemies (weighted average or worst case)
 - [ ] Buffs and talismans as multipliers
 - [ ] Spell scaling for staves and seals
-- [ ] Web UI: a Pyodide prototype is in `web/` (AR + enemy damage); optimizer UI next
+- [x] Web UI: optimizer, calculator and enemy damage, running in the browser (`web/`)
+- [ ] Publish the web UI (GitHub Pages)
 
 ## Credits and license
 

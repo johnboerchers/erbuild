@@ -27,12 +27,15 @@ from .optimizer import Build, EnemyBuild, optimize as _optimize, optimize_vs_ene
 from .regulation import Regulation, load_default
 
 __all__ = [
-    "attack_rating", "call", "classes", "enemies", "enemy_names", "load_enemy_workbook", "optimize", "weapons",
+    "attack_rating", "call", "classes", "enemies", "enemy_names", "export_enemy_data",
+    "load_enemy_data", "load_enemy_workbook", "optimize", "weapons",
 ]
 
 #: Enemy data loaded in this process: from a downloaded workbook (the web page) or
 #: from the local cache written by ``erbuild enemies update``.
 _enemy_data: EnemyData | None = None
+#: The converted data behind `_enemy_data`, so a UI can cache it (see export_enemy_data).
+_enemy_raw: dict | None = None
 
 
 def _endpoint(fn: Callable) -> Callable:
@@ -81,10 +84,25 @@ def classes() -> list[dict]:
 @_endpoint
 def load_enemy_workbook(data: bytes) -> dict:
     """Load enemy data from the community sheet's .xlsx bytes (downloaded by the UI)."""
-    global _enemy_data
     if hasattr(data, "to_bytes"):  # a JavaScript Uint8Array passed in from Pyodide
         data = data.to_bytes()
-    _enemy_data = EnemyData(convert_workbook(io.BytesIO(bytes(data))))
+    return _set_enemy_data(convert_workbook(io.BytesIO(bytes(data))))
+
+
+@_endpoint
+def load_enemy_data(text: str) -> dict:
+    """Load enemy data previously saved with :func:`export_enemy_data`."""
+    return _set_enemy_data(json.loads(text))
+
+
+def export_enemy_data() -> str:
+    """The loaded enemy data as JSON, for a UI to cache locally ("" if none loaded)."""
+    return json.dumps(_enemy_raw, separators=(",", ":")) if _enemy_raw else ""
+
+
+def _set_enemy_data(raw: dict) -> dict:
+    global _enemy_data, _enemy_raw
+    _enemy_data, _enemy_raw = EnemyData(raw), raw
     return _enemy_summary()
 
 
@@ -186,6 +204,7 @@ def _build(b: Build) -> dict:
         "ar": b.rating.displayed_total,
         "raw_ar": b.ar,
         "status": {_key(t): v for t, v in b.rating.displayed.items() if t.is_status},
+        "raw_status": {_key(t): v for t, v in b.status.items()},
         "unmet_requirements": list(b.rating.ineffective_attributes),
     }
 
@@ -224,12 +243,14 @@ def optimize(
         )
         return {
             "weapon": w.key, "upgrade": r.upgrade, "class": r.starting_class.name,
+            "class_stats": dict(r.starting_class.stats),
             "level": r.level, "enemy": _enemy(r.enemy), "method": r.method,
             "best": _enemy_build(r.best), "highest_ar": _enemy_build(r.highest_ar),
         }
     r = _optimize(w, starting_class, int(level), **options)
     return {
         "weapon": w.key, "upgrade": r.upgrade, "class": r.starting_class.name,
+        "class_stats": dict(r.starting_class.stats),
         "level": r.level, "status_types": [_key(t) for t in r.status_types],
         "best": _build(r.best), "frontier": [_build(b) for b in r.frontier],
     }
