@@ -151,6 +151,12 @@ dex = np.arange(15, 100)
 values = attack_power(katana, {"str": 12, "dex": dex, "arc": 50}, upgrade=25)
 ```
 
+### In the browser (prototype)
+
+[`web/`](web/) holds a static page that runs erbuild in the browser via Pyodide,
+using the same Python code with no server. It currently covers the AR calculator and
+per-hit damage against enemies. See [web/README.md](web/README.md) to run it locally.
+
 ## How AR is calculated
 
 For every attack power type *t* (physical, magic, fire, lightning, holy, plus status
@@ -320,7 +326,7 @@ erbuild --data src/erbuild/data/regulation-vanilla-v1.18.json ar "Uchigatana" --
 - [ ] Optimizing against a set of enemies (weighted average or worst case)
 - [ ] Buffs and talismans as multipliers
 - [ ] Spell scaling for staves and seals
-- [ ] Web UI
+- [ ] Web UI: a Pyodide prototype is in `web/` (AR + enemy damage); optimizer UI next
 
 ## Credits and license
 

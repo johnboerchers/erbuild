@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>erbuild</title>
+  <meta name="description" content="Elden Ring attack rating calculator and stat optimizer, running in your browser.">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header>
+    <h1>erbuild</h1>
+    <p class="tagline">Elden Ring attack rating, computed exactly, in your browser.</p>
+    <p id="status" class="status" role="status">Loading Python…</p>
+  </header>
+
+  <main>
+    <form id="ar-form" class="panel" autocomplete="off" aria-busy="true">
+      <h2>Weapon</h2>
+      <label class="wide">Name (including affinity)
+        <input id="weapon" list="weapon-list" value="Blood Uchigatana" spellcheck="false" disabled>
+        <datalist id="weapon-list"></datalist>
+      </label>
+      <div class="row">
+        <label>Upgrade
+          <input id="upgrade" type="number" min="0" max="25" value="25" disabled>
+        </label>
+        <label class="check">
+          <input id="two-handing" type="checkbox" disabled> Two-handed
+        </label>
+      </div>
+
+      <h2>Attributes</h2>
+      <div class="stats">
+        <label>STR <input id="str" type="number" min="1" max="99" value="12" disabled></label>
+        <label>DEX <input id="dex" type="number" min="1" max="99" value="40" disabled></label>
+        <label>INT <input id="int" type="number" min="1" max="99" value="10" disabled></label>
+        <label>FAI <input id="fai" type="number" min="1" max="99" value="10" disabled></label>
+        <label>ARC <input id="arc" type="number" min="1" max="99" value="50" disabled></label>
+      </div>
+    </form>
+
+    <section class="panel" aria-live="polite">
+      <h2>Attack rating</h2>
+      <div id="result" class="result muted">Waiting for Python to load…</div>
+    </section>
+
+    <section class="panel">
+      <h2>Against an enemy <span class="badge">experimental</span></h2>
+      <p class="muted">
+        Enemy stats come from the community
+        <a href="https://docs.google.com/spreadsheets/d/1BVwmKqB8pvuyJkSTGYOM2kAJxFMQ0jVsc6aKYz_Upes/edit" target="_blank" rel="noopener">Elden Ring PvE Enemy Health / Defense Data</a>
+        sheet. erbuild doesn't host it: your browser downloads it straight from Google (about 7 MB).
+      </p>
+      <button id="load-enemies" type="button" disabled>Download enemy data</button>
+      <div id="enemy-controls" hidden>
+        <label class="wide">Enemy
+          <input id="enemy" list="enemy-list" placeholder="e.g. Malenia, Blade of Miquella [Boss]" spellcheck="false">
+          <datalist id="enemy-list"></datalist>
+        </label>
+        <div class="row">
+          <label>Journey
+            <select id="cycle">
+              <option value="ng">NG</option><option value="ng+">NG+</option>
+              <option value="ng+2">NG+2</option><option value="ng+3">NG+3</option>
+              <option value="ng+4">NG+4</option><option value="ng+5">NG+5</option>
+              <option value="ng+6">NG+6</option><option value="ng+7">NG+7</option>
+            </select>
+          </label>
+          <label>Attack type
+            <select id="attack-type">
+              <option>standard</option><option>strike</option><option>slash</option><option>pierce</option>
+            </select>
+          </label>
+          <label>Location (if asked)
+            <input id="location" spellcheck="false">
+          </label>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    <p>
+      Weapon data from Tom Clark's
+      <a href="https://github.com/ThomasJClark/elden-ring-weapon-calculator" target="_blank" rel="noopener">elden-ring-weapon-calculator</a>
+      (MIT). Unofficial fan project; Elden Ring is a trademark of FromSoftware / Bandai Namco.
+    </p>
+    <p id="timings" class="muted"></p>
+  </footer>
+
+  <script type="module" src="app.js"></script>
+</body>
+</html>
