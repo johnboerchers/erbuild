@@ -52,6 +52,72 @@ def _regulation() -> Regulation:
     return load_default()
 
 
+# ---------------------------------------------------------------------- input checks
+# UIs send whatever their form fields hold, so every value is checked here: numbers
+# must be whole where the game needs whole numbers, booleans must really be booleans
+# (the string "false" is truthy in Python), and names must be non-empty strings.
+def _int(value, name: str) -> int:
+    if isinstance(value, bool):
+        raise ValueError(f"{name} must be a whole number, got {value!r}")
+    if isinstance(value, str):
+        value = value.strip()
+        try:
+            return int(value)
+        except ValueError:
+            raise ValueError(f"{name} must be a whole number, got {value!r}") from None
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float) and value.is_integer():
+        return int(value)
+    raise ValueError(f"{name} must be a whole number, got {value!r}")
+
+
+def _optional_int(value, name: str) -> int | None:
+    return None if value is None or value == "" else _int(value, name)
+
+
+def _float(value, name: str) -> float:
+    if isinstance(value, bool) or value is None:
+        raise ValueError(f"{name} must be a number, got {value!r}")
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        raise ValueError(f"{name} must be a number, got {value!r}") from None
+
+
+def _bool(value, name: str) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str) and value.strip().lower() in ("true", "false", "1", "0"):
+        return value.strip().lower() in ("true", "1")
+    if isinstance(value, int) and value in (0, 1):
+        return bool(value)
+    raise ValueError(f"{name} must be true or false, got {value!r}")
+
+
+def _str(value, name: str) -> str:
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError(f"{name} must be a non-empty string")
+    return value
+
+
+def _stat_map(values, name: str) -> dict[str, int]:
+    """{attribute: whole number}; unknown attributes are reported, not ignored."""
+    if values is None:
+        return {}
+    if not isinstance(values, Mapping):
+        raise ValueError(f"{name} must be an object like {{\"vig\": 40}}")
+    out = {}
+    for a, v in values.items():
+        if v is None or v == "":
+            continue  # an empty form field means "not set"
+        out[str(a).strip().lower()] = _int(v, f"{name}.{a}")
+    unknown = sorted(set(out) - set(ALL_ATTRIBUTES))
+    if unknown:
+        raise ValueError(f"Unknown attribute {unknown[0]!r}. Options: {', '.join(ALL_ATTRIBUTES)}")
+    return out
+
+
 def _key(t: AttackPowerType) -> str:
     return t.name.lower()
 
@@ -125,12 +191,26 @@ def enemy_names() -> list[str]:
 
 
 @_endpoint
-def enemies(query: str, cycle: str | int = "ng", limit: int = 20) -> list[dict]:
-    return [_enemy(e) for e in _enemies().search(query, parse_cycle(cycle), limit)]
+def enemies(query: str = "", cycle: str | int = "ng", limit: int = 20) -> list[dict]:
+    query = query if isinstance(query, str) else ""
+    limit = max(1, _int(limit, "limit"))
+    return [_enemy(e) for e in _enemies().search(query, _cycle(cycle), limit)]
+
+
+def _cycle(value) -> int:
+    return parse_cycle("ng" if value is None or value == "" else value)
 
 
 def _find_enemy(spec: Mapping) -> Enemy:
-    return _enemies().get(spec["name"], parse_cycle(spec.get("cycle", "ng")), spec.get("location"))
+    if not isinstance(spec, Mapping):
+        raise ValueError('enemy must be an object like {"name": "…", "cycle": "ng"}')
+    location = spec.get("location")
+    return _enemies().get(
+        _str(spec.get("name"), "enemy.name"),
+        _cycle(spec.get("cycle")),
+        location if isinstance(location, str) and location.strip() else None,
+        _optional_int(spec.get("variant"), "enemy.variant"),
+    )
 
 
 def _enemy(e: Enemy) -> dict:
@@ -170,14 +250,18 @@ def attack_rating(
 ) -> dict:
     """AR for one set of attributes; with `enemy` ({name, cycle?, location?}), damage too."""
     reg = _regulation()
-    w = reg.get(weapon)
-    upgrade = w.max_upgrade if upgrade is None else int(upgrade)
-    attrs = {a: int(attributes.get(a, 10)) for a in SCALING_ATTRIBUTES}
-    ar = _attack_rating(w, attrs, upgrade, bool(two_handing))
+    w = reg.get(_str(weapon, "weapon"))
+    upgrade = _optional_int(upgrade, "upgrade")
+    upgrade = w.max_upgrade if upgrade is None else upgrade
+    given = _stat_map(attributes, "attributes")
+    attrs = {a: given.get(a, 10) for a in SCALING_ATTRIBUTES}
+    two_handing = _bool(two_handing, "two_handing")
+    motion_value = _float(motion_value, "motion_value")
+    ar = _attack_rating(w, attrs, upgrade, two_handing)
     out = {
         "weapon": w.key,
         "upgrade": upgrade,
-        "two_handing": bool(two_handing),
+        "two_handing": two_handing,
         "attributes": attrs,
         "scaling": {
             a: w.scaling_grade(a, upgrade, reg.scaling_tiers)
@@ -232,13 +316,19 @@ def optimize(
     plus the highest-AR build scored against the same enemy.
     """
     reg = _regulation()
-    w = reg.get(weapon)
-    fixed = {a: int(v) for a, v in (fixed or {}).items() if a in ALL_ATTRIBUTES}
-    minimum = {a: int(v) for a, v in (minimum or {}).items() if a in ALL_ATTRIBUTES}
-    options = dict(upgrade=upgrade, two_handing=bool(two_handing), fixed=fixed, minimum=minimum)
+    w = reg.get(_str(weapon, "weapon"))
+    starting_class = _str(starting_class, "starting_class")
+    level = _int(level, "level")
+    options = dict(
+        upgrade=_optional_int(upgrade, "upgrade"),
+        two_handing=_bool(two_handing, "two_handing"),
+        fixed=_stat_map(fixed, "fixed"),
+        minimum=_stat_map(minimum, "minimum"),
+    )
+    motion_value = _float(motion_value, "motion_value")
     if enemy:
         r = optimize_vs_enemy(
-            w, starting_class, int(level), _find_enemy(enemy), **options,
+            w, starting_class, level, _find_enemy(enemy), **options,
             motion_value=motion_value, attack_type=attack_type, regulation=reg,
         )
         return {
@@ -247,7 +337,7 @@ def optimize(
             "level": r.level, "enemy": _enemy(r.enemy), "method": r.method,
             "best": _enemy_build(r.best), "highest_ar": _enemy_build(r.highest_ar),
         }
-    r = _optimize(w, starting_class, int(level), **options)
+    r = _optimize(w, starting_class, level, **options)
     return {
         "weapon": w.key, "upgrade": r.upgrade, "class": r.starting_class.name,
         "class_stats": dict(r.starting_class.stats),

@@ -126,3 +126,22 @@ def test_starting_classes_level_identity():
     assert len(STARTING_CLASSES) == 10
     for c in STARTING_CLASSES.values():
         assert sum(c.stats.values()) - LEVEL_OFFSET == c.level
+
+
+def test_weapon_lookup_and_search_edges(reg):
+    with pytest.raises(KeyError, match="Enter a weapon name"):
+        reg.get("   ")
+    assert reg.get("  Uchigatana ").name == "Uchigatana"
+    assert reg.search("uchigatana", limit=0) == []
+    assert reg.search("uchigatana", limit=-1) == []
+
+
+def test_regulation_load_errors(tmp_path):
+    from erbuild import Regulation
+
+    with pytest.raises(ValueError, match="Can't read weapon data"):
+        Regulation.load(tmp_path / "missing.json")
+    bad = tmp_path / "regulation-bad.json"
+    bad.write_text('{"weapons": []}')
+    with pytest.raises(ValueError, match="isn't erbuild weapon data"):
+        Regulation.load(bad)

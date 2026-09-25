@@ -153,8 +153,16 @@ class Regulation:
         if path is None:
             return load_default()
         path = Path(path)
-        with path.open(encoding="utf-8") as f:
-            return cls(json.load(f), version=path.stem.removeprefix("regulation-"))
+        try:
+            with path.open(encoding="utf-8") as f:
+                raw = json.load(f)
+            return cls(raw, version=path.stem.removeprefix("regulation-"))
+        except OSError as e:
+            raise ValueError(f"Can't read weapon data at {path}: {e.strerror or e}") from None
+        except (ValueError, KeyError, TypeError) as e:
+            raise ValueError(
+                f"{path} isn't erbuild weapon data (a regulation JSON file): {e}"
+            ) from None
 
     def _decode(self, w: dict) -> Weapon:
         aec = dict(self._aec[w["attackElementCorrectId"]])
@@ -214,6 +222,9 @@ class Regulation:
 
     def get(self, name: str) -> Weapon:
         """Look up a weapon by exact name (case-insensitive), with suggestions on failure."""
+        if not name or not name.strip():
+            raise KeyError("Enter a weapon name.")
+        name = name.strip()
         if name in self.weapons:
             return self.weapons[name]
         lowered = {k.lower(): v for k, v in self.weapons.items()}
@@ -225,9 +236,9 @@ class Regulation:
 
     def search(self, query: str, limit: int = 20) -> list[Weapon]:
         """Case-insensitive substring search over weapon names."""
-        q = query.lower()
+        q = query.strip().lower()
         hits = [w for w in self.weapons.values() if q in w.key.lower()]
-        return sorted(hits, key=lambda w: (len(w.key), w.key))[:limit]
+        return sorted(hits, key=lambda w: (len(w.key), w.key))[: max(0, limit)]
 
 
 @lru_cache(maxsize=1)

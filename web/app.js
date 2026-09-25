@@ -70,7 +70,7 @@ function setStatus(text, state = "") {
 // ---------------------------------------------------------------- state <-> form <-> URL
 const HASH_FIELDS = {
   w: "weapon", u: "upgrade", c: "class", l: "level", e: "enemy", cy: "cycle",
-  at: "attack-type", mv: "mv", loc: "location",
+  at: "attack-type", mv: "mv", loc: "location", v: "variant",
   ...Object.fromEntries(FIXABLE.map((a) => [a, `fix-${a}`])),
   ...Object.fromEntries(DAMAGE_STATS.map((a) => [`min${a}`, `min-${a}`])),
   ...Object.fromEntries(DAMAGE_STATS.map((a) => [`c${a}`, a])),
@@ -99,8 +99,16 @@ function readHash() {
   const params = new URLSearchParams(location.hash.slice(1));
   if (!params.size) return;
   for (const [key, id] of Object.entries(HASH_FIELDS)) {
-    if (params.has(key)) $(id).value = params.get(key);
-    else if (id.startsWith("fix-") || id.startsWith("min-")) $(id).value = "";
+    const node = $(id);
+    if (params.has(key)) {
+      const value = params.get(key);
+      // A link can hold anything: keep dropdowns and the slider on valid values.
+      if (node.tagName === "SELECT" && ![...node.options].some((o) => o.value === value)) continue;
+      if (node.type === "range" && !/^\d+$/.test(value)) continue;
+      node.value = value;
+    } else if (id.startsWith("fix-") || id.startsWith("min-")) {
+      node.value = "";
+    }
   }
   document.querySelector(`input[name="grip"][value="${params.get("g") === "2" ? "two" : "one"}"]`).checked = true;
   setMode(params.get("m") === "calculator" ? "calculator" : "optimizer", false);
@@ -116,11 +124,15 @@ function enemySpec() {
   if (!enemiesLoaded || !name) return null;
   const spec = { name, cycle: $("cycle").value };
   if ($("location").value.trim()) spec.location = $("location").value.trim();
+  const variant = numberOrNull("variant");
+  if (variant != null) spec.variant = variant;
   return spec;
 }
 
 function enemyOptions() {
-  return { motion_value: Number($("mv").value) || 100, attack_type: $("attack-type").value };
+  // Pass what was typed; the API explains bad values (0 isn't silently turned into 100).
+  const mv = numberOrNull("mv");
+  return { motion_value: mv ?? 100, attack_type: $("attack-type").value };
 }
 
 // ---------------------------------------------------------------- boot
@@ -175,8 +187,15 @@ function render() {
   for (const node of document.querySelectorAll("[data-show]")) node.hidden = node.dataset.show !== mode();
   $("view-optimizer").hidden = mode() !== "optimizer";
   $("view-calculator").hidden = mode() !== "calculator";
-  if (mode() === "optimizer") renderOptimizer();
-  else renderCalculator();
+  try {
+    if (mode() === "optimizer") renderOptimizer();
+    else renderCalculator();
+    if ($("status").classList.contains("error")) setStatus("Ready", "ready");
+  } catch (err) {
+    // The API returns user errors as data, so this is a genuine bug: say so, don't freeze.
+    console.error(err);
+    setStatus("Something went wrong. Please report it on GitHub.", "error");
+  }
 }
 
 function syncWeapon() {
@@ -220,6 +239,11 @@ function optimizerRequest() {
 }
 
 function renderOptimizer() {
+  if ($("level").value.trim() === "") {
+    errorCard($("opt-summary"), "Best build", "Enter a target level.");
+    $("opt-chart-card").hidden = true;
+    return;
+  }
   const req = optimizerRequest();
   const key = JSON.stringify([req, enemySpec(), enemyOptions()]);
   if (key !== lastFrontierKey) { selected = null; lastFrontierKey = key; }
@@ -422,7 +446,8 @@ function renderTable(out, statusType, index) {
 
 // ---- calculator
 function renderCalculator() {
-  const attributes = Object.fromEntries(DAMAGE_STATS.map((a) => [a, Number($(a).value) || 1]));
+  // Empty fields fall back to 10 in the API; other values go through as typed.
+  const attributes = Object.fromEntries(DAMAGE_STATS.map((a) => [a, numberOrNull(a)]));
   const enemy = enemySpec();
   const out = call("attack_rating", {
     weapon: $("weapon").value.trim(),

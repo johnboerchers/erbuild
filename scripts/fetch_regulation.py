@@ -15,10 +15,12 @@ from __future__ import annotations
 
 import argparse
 import json
+import urllib.error
 import urllib.request
 from pathlib import Path
 
-BASE = "https://raw.githubusercontent.com/ThomasJClark/elden-ring-weapon-calculator/main/public"
+# HEAD follows the upstream default branch (currently "master"), whatever it's named.
+BASE = "https://raw.githubusercontent.com/ThomasJClark/elden-ring-weapon-calculator/HEAD/public"
 
 
 def main() -> None:
@@ -29,8 +31,16 @@ def main() -> None:
 
     url = f"{BASE}/regulation-{args.version}.js"
     print(f"Downloading {url}")
-    with urllib.request.urlopen(url) as resp:
-        data = json.load(resp)
+    try:
+        with urllib.request.urlopen(url, timeout=60) as resp:
+            data = json.load(resp)
+    except urllib.error.HTTPError as e:
+        hint = " Check the version name against the upstream public/ folder." if e.code == 404 else ""
+        raise SystemExit(f"Download failed: HTTP {e.code}.{hint}") from None
+    except (urllib.error.URLError, TimeoutError) as e:
+        raise SystemExit(f"Download failed: {getattr(e, 'reason', e)}") from None
+    except json.JSONDecodeError:
+        raise SystemExit("Download succeeded but isn't JSON; has the upstream format changed?") from None
 
     required = {"calcCorrectGraphs", "attackElementCorrects", "reinforceTypes",
                 "statusSpEffectParams", "scalingTiers", "weapons"}
@@ -39,6 +49,7 @@ def main() -> None:
         raise SystemExit(f"Unexpected format, missing keys: {sorted(missing)}")
 
     out = Path(args.out) / f"regulation-{args.version}.json"
+    out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(data, separators=(",", ":")), encoding="utf-8")
     print(f"Wrote {len(data['weapons'])} weapons to {out}")
 

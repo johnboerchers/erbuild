@@ -78,6 +78,10 @@ def enemy_workbook(tmp_path_factory):
             _row("Field", "Soldier", 800.0 * scale, 90.0, 200.0, 1.0),
             _row("Cave", "Soldier", 900.0 * scale, 95.0, 200.0, 1.0),
             _row("Lake", "Crab", "-", 90.0, 200.0, 1.0),  # no HP: skipped
+            _row("Arena", "Chariot", 0.0, 90.0, 200.0, 1.0),  # 0 HP (can't be damaged): skipped
+            _row("Tower", "Mage", 700.0 * scale, 100.0, 300.0, 1.0),  # two placements, same
+            _row("Tower", "Mage", 700.0 * scale, 120.0, 300.0, 1.0),  # location, different stats
+            _row("Tower", "Mage", 700.0 * scale, 100.0, 300.0, 1.0),  # duplicate of the first
         ]
     sheets["Item Drops"] = [["ignored"]]
     write_workbook(path, sheets)

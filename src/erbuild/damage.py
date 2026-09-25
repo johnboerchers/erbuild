@@ -22,6 +22,7 @@ hit applies the weapon's full buildup, and poison, scarlet rot and frost add no 
 
 from __future__ import annotations
 
+import math
 from collections.abc import Mapping
 from dataclasses import dataclass
 
@@ -72,6 +73,8 @@ def direct_damage(
     """Damage from one hit (before bleed), summed over damage types. Unrounded."""
     if attack_type not in ATTACK_TYPES:
         raise ValueError(f"attack_type must be one of {', '.join(ATTACK_TYPES)}")
+    if not (math.isfinite(motion_value) and motion_value > 0):
+        raise ValueError(f"Motion value must be a positive number, got {motion_value:g}")
     total = np.float64(0.0)
     for t, ar in values.items():
         if not t.is_damage:
@@ -80,7 +83,9 @@ def direct_damage(
         attack = np.asarray(ar, dtype=np.float64) * (motion_value / 100.0)
         defense = enemy.defense[key]
         ratio = attack / defense if defense > 0 else np.full_like(attack, np.inf)
-        total = total + attack * defense_multiplier(ratio) * (1.0 - enemy.negation[key] / 100.0)
+        # Negation above 100% would mean negative damage; the data tops out at 100.
+        taken = max(0.0, 1.0 - enemy.negation[key] / 100.0)
+        total = total + attack * defense_multiplier(ratio) * taken
     return np.asarray(total)
 
 
@@ -103,6 +108,8 @@ def bleed_flat_damage(weapon: Weapon, regulation: Regulation | None = None) -> f
 
 def bleed_proc_damage(enemy: Enemy, flat: float = BLEED_FLAT_DEFAULT) -> float:
     """Damage of one hemorrhage proc against this enemy."""
+    if not (math.isfinite(flat) and flat >= 0):
+        raise ValueError(f"Flat bleed damage must be zero or more, got {flat:g}")
     multiplier = enemy.status_multiplier.get(AttackPowerType.BLEED, 1.0)
     return multiplier * (BLEED_HP_FRACTION * enemy.hp + flat)
 
@@ -147,6 +154,7 @@ def damage_per_hit(
     bleed_flat: float = BLEED_FLAT_DEFAULT,
 ) -> np.ndarray:
     """The enemy-aware objective: direct damage plus bleed per hit. Vectorized."""
+    bleed_proc_damage(enemy, bleed_flat)  # validates bleed_flat
     total = direct_damage(values, enemy, motion_value, attack_type)
     buildup = values.get(AttackPowerType.BLEED)
     if buildup is not None:
@@ -162,6 +170,7 @@ def hit_breakdown(
     bleed_flat: float = BLEED_FLAT_DEFAULT,
 ) -> HitDamage:
     """Damage per hit for a single build, with the bleed part separated."""
+    bleed_proc_damage(enemy, bleed_flat)  # validates bleed_flat
     direct = float(direct_damage(values, enemy, motion_value, attack_type))
     buildup = values.get(AttackPowerType.BLEED, 0.0)
     hits = float(hits_to_proc(buildup, enemy.resistance.get(AttackPowerType.BLEED)))

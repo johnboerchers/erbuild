@@ -14,7 +14,9 @@ Examples:
 from __future__ import annotations
 
 import argparse
+import math
 import sys
+import zipfile
 
 import numpy as np
 
@@ -37,6 +39,30 @@ from .regulation import Regulation
 
 _BLEED_NOTE = ("Bleed is averaged over its proc cycle, using the first proc's length; "
                "see the README for how it's modeled.")
+
+
+def _number_type(minimum: float, inclusive: bool, integer: bool = False):
+    """argparse type: a finite number above (or at) `minimum`, with a readable error."""
+    def parse(text: str):
+        try:
+            value = int(text) if integer else float(text)
+        except ValueError:
+            kind = "a whole number" if integer else "a number"
+            raise argparse.ArgumentTypeError(f"expected {kind}, got {text!r}") from None
+        if not math.isfinite(value):
+            raise argparse.ArgumentTypeError(f"must be a finite number, got {text}")
+        ok = value >= minimum if inclusive else value > minimum
+        if not ok:
+            bound = f"at least {minimum:g}" if inclusive else f"greater than {minimum:g}"
+            raise argparse.ArgumentTypeError(f"must be {bound}, got {text}")
+        return value
+    return parse
+
+
+_positive = _number_type(0, inclusive=False)
+_non_negative = _number_type(0, inclusive=True)
+_positive_int = _number_type(1, inclusive=True, integer=True)
+_non_negative_int = _number_type(0, inclusive=True, integer=True)
 
 
 def _load(args: argparse.Namespace) -> Regulation:
@@ -67,19 +93,21 @@ def _add_enemy_args(parser: argparse.ArgumentParser, help_suffix: str) -> None:
                    help='Enemy name as in `erbuild enemies search`, e.g. "Malenia, Blade of Miquella [Boss]"')
     g.add_argument("--location", metavar="TEXT",
                    help="Pick a placement when the enemy appears in several places")
+    g.add_argument("--variant", type=_positive_int, metavar="N",
+                   help="Pick one of several placements in the same location (listed when needed)")
     g.add_argument("--cycle", default="ng", metavar="NG",
                    help="Journey cycle: ng, ng+, ng+2 … ng+7 (default: ng)")
-    g.add_argument("--mv", type=float, default=100.0, metavar="N",
+    g.add_argument("--mv", type=_positive, default=100.0, metavar="N",
                    help="Motion value of the attack (default: 100)")
     g.add_argument("--attack-type", choices=ATTACK_TYPES, default="standard",
                    help="Physical attack type (default: standard)")
-    g.add_argument("--bleed-flat", type=float, metavar="N",
+    g.add_argument("--bleed-flat", type=_non_negative, metavar="N",
                    help="Flat part of a bleed proc (default: 100 or 200 depending on weapon)")
 
 
 def _load_enemy(args: argparse.Namespace) -> Enemy:
     data = load_enemies(args.enemy_data)
-    return data.get(args.enemy, parse_cycle(args.cycle), args.location)
+    return data.get(args.enemy, parse_cycle(args.cycle), args.location, args.variant)
 
 
 def _enemy_line(enemy: Enemy, args: argparse.Namespace) -> str:
@@ -278,6 +306,9 @@ def cmd_enemies_update(args: argparse.Namespace) -> int:
         path = update_enemy_data(args.enemy_data)
     except OSError as e:
         return _error(f"Download failed: {e}")
+    except (zipfile.BadZipFile, ValueError, KeyError) as e:
+        return _error(f"The download wasn't the expected enemy workbook ({e}). "
+                      "The sheet may have moved or changed format.")
     data = load_enemies(path)
     print(f"Saved {len(data)} enemy placements × {len(CYCLE_SHEETS)} cycles to {path}")
     print("Enemy data: 'Elden Ring PvE Enemy Health / Defense Data' community sheet.")
@@ -337,15 +368,16 @@ def build_parser() -> argparse.ArgumentParser:
 
     s = sub.add_parser("search", help="Find weapons by name")
     s.add_argument("query")
-    s.add_argument("--limit", type=int, default=20)
+    s.add_argument("--limit", type=_positive_int, default=20)
     s.set_defaults(func=cmd_search)
 
     a = sub.add_parser("ar", help="Compute attack rating for a weapon and attributes")
     a.add_argument("weapon", help='Full weapon name including affinity, e.g. "Blood Uchigatana"')
     for attr in SCALING_ATTRIBUTES:
         a.add_argument(f"--{attr}", type=int, default=10, metavar="N")
-    a.add_argument("--upgrade", "-u", type=int, metavar="N", help="Upgrade level (default: max)")
-    a.add_argument("--two-handing", "-2", action="store_true")
+    a.add_argument("--upgrade", "-u", type=_non_negative_int, metavar="N",
+                   help="Upgrade level (default: max)")
+    a.add_argument("--two-handing", action="store_true")
     _add_enemy_args(a, "(prints damage per hit)")
     a.set_defaults(func=cmd_ar)
 
@@ -365,9 +397,10 @@ def build_parser() -> argparse.ArgumentParser:
         o.add_argument(f"--{attr}", type=int, metavar="N", help=f"Fix {attr.upper()} at N")
     o.add_argument("--min", action="append", default=[], metavar="STAT=N",
                    help="Require STAT >= N (repeatable), e.g. --min mnd=20")
-    o.add_argument("--upgrade", "-u", type=int, metavar="N", help="Upgrade level (default: max)")
-    o.add_argument("--two-handing", "-2", action="store_true")
-    o.add_argument("--min-buildup", type=float, metavar="N",
+    o.add_argument("--upgrade", "-u", type=_non_negative_int, metavar="N",
+                   help="Upgrade level (default: max)")
+    o.add_argument("--two-handing", action="store_true")
+    o.add_argument("--min-buildup", type=_non_negative, metavar="N",
                    help="Best build whose arcane status buildup (e.g. bleed) is at least N")
     o.add_argument("--all", action="store_true", help="Print every Pareto-optimal build")
     _add_enemy_args(o, "(optimizes damage per hit instead of AR)")
@@ -380,11 +413,13 @@ def build_parser() -> argparse.ArgumentParser:
     es = esub.add_parser("search", help="Find enemies by name")
     es.add_argument("query")
     es.add_argument("--cycle", default="ng", metavar="NG", help="Journey cycle (default: ng)")
-    es.add_argument("--limit", type=int, default=20)
+    es.add_argument("--limit", type=_positive_int, default=20)
     es.set_defaults(func=cmd_enemies_search)
     eshow = esub.add_parser("show", help="Show an enemy's HP, defenses and resistances")
     eshow.add_argument("enemy", metavar="NAME")
     eshow.add_argument("--location", metavar="TEXT", help="Pick a placement by location")
+    eshow.add_argument("--variant", type=_positive_int, metavar="N",
+                       help="Pick one of several placements in the same location")
     eshow.add_argument("--cycle", default="ng", metavar="NG", help="Journey cycle (default: ng)")
     eshow.set_defaults(func=cmd_enemies_show)
 
@@ -395,7 +430,10 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
-    return args.func(args)
+    try:
+        return args.func(args)
+    except (KeyError, ValueError, FileNotFoundError) as e:
+        return _error(str(e.args[0]) if e.args else type(e).__name__)
 
 
 if __name__ == "__main__":

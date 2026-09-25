@@ -139,14 +139,16 @@ def convert_workbook(path: str | Path) -> dict:
     """Convert the downloaded .xlsx into the cache format."""
     sheets = read_xlsx(path, CYCLE_SHEETS)
     cycles = {}
+    invulnerable: set[str] = set()
     for cycle, name in enumerate(CYCLE_SHEETS):
         if name not in sheets:
             raise ValueError(f"Enemy workbook has no {name!r} sheet; has the format changed?")
-        cycles[str(cycle)] = _parse_sheet(sheets[name])
-    return {"source": SHEET_URL, "cycles": cycles}
+        cycles[str(cycle)], skipped = _parse_sheet(sheets[name])
+        invulnerable.update(skipped)
+    return {"source": SHEET_URL, "cycles": cycles, "invulnerable": sorted(invulnerable)}
 
 
-def _parse_sheet(rows: list[list]) -> list[dict]:
+def _parse_sheet(rows: list[list]) -> tuple[list[dict], list[str]]:
     groups, headers = rows[0], rows[1]
     columns: dict[tuple[str, str], int] = {}
     group = ""
@@ -170,10 +172,14 @@ def _parse_sheet(rows: list[list]) -> list[dict]:
     multiplier = {int(t): col("Incoming Status", h) for h, t in _STATUS_MULTIPLIER_COLUMNS.items()}
 
     enemies = []
+    invulnerable = set()
     for row in rows[2:]:
         cell = lambda i: row[i] if i < len(row) else None  # noqa: E731
         hp = _number(cell(health))
-        if not cell(name) or hp is None:
+        # 0 HP marks things that can't be damaged (e.g. the Merciless Chariot).
+        if cell(name) and hp is not None and hp <= 0:
+            invulnerable.add(str(cell(name)).strip())
+        if not cell(name) or hp is None or hp <= 0:
             continue
         defenses = {k: _number(cell(i)) for k, i in defense.items()}
         negations = {k: _number(cell(i)) for k, i in negation.items()}
@@ -189,7 +195,8 @@ def _parse_sheet(rows: list[list]) -> list[dict]:
             "resistance": {str(t): _number(cell(i)) for t, i in resistance.items()},
             "status_multiplier": {str(t): _number(cell(i), 1.0) for t, i in multiplier.items()},
         })
-    return enemies
+    names = {e["name"] for e in enemies}
+    return enemies, sorted(invulnerable - names)
 
 
 def _number(value, default=None):
@@ -240,11 +247,16 @@ def read_xlsx(path: str | Path, sheet_names: tuple[str, ...] | None = None) -> d
 
 
 def _read_sheet(xml: bytes, strings: list[str]) -> list[list]:
-    rows = []
+    rows: list[list] = []
     for row in ElementTree.fromstring(xml).iter(f"{{{_NS['m']}}}row"):
+        # Writers may skip empty rows; the r attribute (1-based) says where this one goes.
+        number = row.get("r")
+        if number and number.isdigit():
+            rows.extend([] for _ in range(int(number) - 1 - len(rows)))
         values: list = []
         for c in row.findall("m:c", _NS):
-            index = _column_index(c.get("r"))
+            ref = c.get("r")
+            index = _column_index(ref) if ref else len(values)
             kind = c.get("t")
             if kind == "inlineStr":
                 value = "".join(t.text or "" for t in c.iter(f"{{{_NS['m']}}}t"))
@@ -283,26 +295,39 @@ class EnemyData:
         self.source = raw.get("source", SHEET_URL)
         self.retrieved = raw.get("retrieved")
         self.enemies: dict[int, list[Enemy]] = {}
+        #: Names that only appear with 0 HP: they can't be damaged, so they're left out.
+        self.invulnerable = {n.lower() for n in raw.get("invulnerable", [])}
         for cycle, rows in raw["cycles"].items():
-            self.enemies[int(cycle)] = [_decode(row, int(cycle)) for row in rows]
+            self.enemies[int(cycle)] = [_decode(row, int(cycle)) for row in rows if row["hp"] > 0]
+            self.invulnerable.update(row["name"].lower() for row in rows if row["hp"] <= 0)
+        self.invulnerable -= {e.name.lower() for e in self.enemies.get(0, [])}
 
     def __len__(self) -> int:
         return len(self.enemies.get(0, []))
 
     def search(self, query: str, cycle: int = 0, limit: int = 20) -> list[Enemy]:
-        q = query.lower()
+        q = query.strip().lower()
         hits = [e for e in self.enemies[cycle] if q in e.name.lower()]
         hits.sort(key=lambda e: (not e.is_boss, len(e.name), e.name, e.location))
-        return hits[:limit]
+        return hits[: max(0, limit)]
 
-    def get(self, name: str, cycle: int = 0, location: str | None = None) -> Enemy:
+    def get(
+        self, name: str, cycle: int = 0, location: str | None = None, variant: int | None = None
+    ) -> Enemy:
         """Look up an enemy by name (case-insensitive).
 
-        When a name has several placements with different stats, `location` picks one
-        (a case-insensitive substring match).
+        Some names have several placements with different stats. `location` (a
+        case-insensitive substring) narrows them down; when placements in the same
+        location still differ, `variant` picks one by number (1, 2, …) in the order the
+        error message lists them.
         """
+        if not name or not name.strip():
+            raise KeyError("Enter an enemy name.")
         pool = self.enemies[cycle]
         matches = [e for e in pool if e.name.lower() == name.strip().lower()]
+        if not matches and name.strip().lower() in self.invulnerable:
+            raise KeyError(f"{name.strip()} can't be damaged (the enemy data lists 0 HP), "
+                           "so there's nothing to optimize against.")
         if not matches:
             names = sorted({e.name for e in pool})
             lowered = {n.lower(): n for n in names}
@@ -317,13 +342,28 @@ class EnemyData:
                 places = "; ".join(sorted({e.location for e in matches}))
                 raise KeyError(f"{matches[0].name} isn't found at {location!r}. Locations: {places}")
             matches = located
-        if any(not m.same_stats(matches[0]) for m in matches[1:]):
-            places = "; ".join(sorted({e.location for e in matches}))
-            raise KeyError(
-                f"{matches[0].name} appears in several places with different stats. "
-                f"Pick one with a location: {places}"
-            )
-        return matches[0]
+
+        # Placements with identical stats are interchangeable; keep one of each.
+        variants: list[Enemy] = []
+        for e in matches:
+            if not any(e.same_stats(v) for v in variants):
+                variants.append(e)
+        if variant is not None:
+            if not 1 <= variant <= len(variants):
+                raise KeyError(
+                    f"{matches[0].name} has {len(variants)} variant(s) here; "
+                    f"pick a number from 1 to {len(variants)}."
+                )
+            return variants[variant - 1]
+        if len(variants) == 1:
+            return variants[0]
+        listed = [f"{i}: {v.location} ({v.hp:,.0f} HP)" for i, v in enumerate(variants[:12], 1)]
+        if len(variants) > 12:
+            listed.append(f"… {len(variants) - 12} more")
+        raise KeyError(
+            f"{matches[0].name} has {len(variants)} placements with different stats. "
+            f"Narrow it down with a location, or pick a variant number: {'; '.join(listed)}"
+        )
 
 
 def _decode(row: dict, cycle: int) -> Enemy:
@@ -349,4 +389,10 @@ def load_enemies(path: str | Path | None = None) -> EnemyData:
             f"No enemy data at {path}. Run `erbuild enemies update` to download it "
             f"(source: {SHEET_URL})."
         )
-    return EnemyData(json.loads(path.read_text(encoding="utf-8")))
+    try:
+        return EnemyData(json.loads(path.read_text(encoding="utf-8")))
+    except (ValueError, KeyError, TypeError) as e:
+        raise ValueError(
+            f"The enemy data at {path} is unreadable ({e}). "
+            "Run `erbuild enemies update` to download it again."
+        ) from None

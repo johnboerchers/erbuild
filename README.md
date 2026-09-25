@@ -80,7 +80,7 @@ the last 5 points of bleed cost about 95.
 | `--vig 60`, `--mnd 20`, … | Fix any attribute at an exact value |
 | `--min mnd=20` | Require an attribute to be *at least* a value (repeatable) |
 | `--min-buildup 110` | Pick the highest-AR build with at least that much buildup |
-| `--two-handing` / `-2`, `--upgrade N` | Set the grip and upgrade level |
+| `--two-handing`, `--upgrade N` | Set the grip and upgrade level |
 
 Points that wouldn't raise AR are left unassigned and shown as *free points*: put them
 wherever you like.
@@ -142,6 +142,7 @@ instead of 5. AR alone can't show you that.
 |---|---|
 | `--cycle ng+2` | Journey, NG through NG+7 |
 | `--location "castle"` | Pick a placement when an enemy appears in several places |
+| `--variant 2` | Pick one of several placements with different stats in the same location (erbuild lists them when it's needed) |
 | `--attack-type slash` | Physical attack type: `standard`, `strike`, `slash` or `pierce` (enemies defend against each separately) |
 | `--mv 130` | The attack's motion value (default 100, the weapon's full AR) |
 | `--bleed-flat 200` | Override the flat part of a bleed proc |

@@ -113,16 +113,82 @@ def test_convert_workbook(enemy_data):
     assert knight.resistance[AttackPowerType.POISON] is None  # Immune
     assert knight.resistance[BLEED] == 400
     assert knight.status_multiplier[BLEED] == 0.7
-    assert len(enemy_data) == 3  # the row without HP is skipped
+    assert len(enemy_data) == 6  # rows without HP, or with 0 HP, are skipped
+    assert "Chariot" not in {e.name for e in enemy_data.enemies[0]}
+    with pytest.raises(KeyError, match="can't be damaged"):
+        enemy_data.get("chariot")
 
 
 def test_enemy_lookup(enemy_data):
-    with pytest.raises(KeyError, match="several places"):
+    with pytest.raises(KeyError, match="different stats"):
         enemy_data.get("Soldier")
     assert enemy_data.get("Soldier", location="cave").hp == 900
     with pytest.raises(KeyError, match="Did you mean: Knight"):
         enemy_data.get("knigt [boss]")
     assert [e.name for e in enemy_data.search("o")][0] == "Knight [Boss]"  # bosses first
+
+
+def test_enemy_variants(enemy_data):
+    with pytest.raises(KeyError, match="2 placements with different stats") as err:
+        enemy_data.get("Mage", location="tower")
+    assert "1: Tower" in str(err.value) and "2: Tower" in str(err.value)
+    assert enemy_data.get("Mage", location="tower", variant=1).defense["standard"] == 100
+    assert enemy_data.get("Mage", variant=2).defense["standard"] == 120
+    with pytest.raises(KeyError, match="from 1 to 2"):
+        enemy_data.get("Mage", variant=3)
+    with pytest.raises(KeyError, match="Enter an enemy name"):
+        enemy_data.get("  ")
+
+
+def test_enemy_search_limit(enemy_data):
+    assert enemy_data.search("", limit=0) == []
+    assert enemy_data.search("", limit=-1) == []  # not "everything but the last"
+    assert len(enemy_data.search("", limit=2)) == 2
+
+
+def test_unreadable_enemy_cache(tmp_path):
+    from erbuild.enemies import load_enemies
+
+    bad = tmp_path / "enemies.json"
+    bad.write_text("{not json")
+    with pytest.raises(ValueError, match="erbuild enemies update"):
+        load_enemies(bad)
+
+
+def test_read_xlsx_sparse_rows_and_missing_refs(tmp_path):
+    import zipfile
+
+    ns = 'xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"'
+    rel = 'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"'
+    path = tmp_path / "sparse.xlsx"
+    with zipfile.ZipFile(path, "w") as z:
+        z.writestr("xl/workbook.xml", f'<workbook {ns} {rel}><sheets>'
+                   '<sheet name="S" sheetId="1" r:id="rId1"/></sheets></workbook>')
+        z.writestr("xl/_rels/workbook.xml.rels",
+                   '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+                   '<Relationship Id="rId1" Target="/xl/worksheets/sheet1.xml" Type="x"/></Relationships>')
+        z.writestr("xl/sharedStrings.xml", f"<sst {ns}><si><r><t>Rich </t></r><r><t>text</t></r></si></sst>")
+        z.writestr("xl/worksheets/sheet1.xml", f"<worksheet {ns}><sheetData>"
+                   '<row r="1"><c r="A1" t="s"><v>0</v></c></row>'
+                   '<row r="3"><c t="inlineStr"><is><t>a</t></is></c><c><v>7</v></c><c r="AA3"><v>1</v></c></row>'
+                   "</sheetData></worksheet>")
+    rows = read_xlsx(path)["S"]
+    assert rows[0] == ["Rich text"] and rows[1] == []  # skipped row 2 stays in place
+    assert rows[2][:2] == ["a", 7.0] and rows[2][26] == 1.0
+
+
+def test_damage_input_validation():
+    enemy = make_enemy()
+    values = {AttackPowerType.PHYSICAL: 300.0}
+    for mv in (0, -10, float("nan")):
+        with pytest.raises(ValueError, match="Motion value"):
+            direct_damage(values, enemy, motion_value=mv)
+    with pytest.raises(ValueError, match="Flat bleed"):
+        damage_per_hit(values, enemy, bleed_flat=-1)
+    immune = make_enemy(negation=100)
+    assert direct_damage(values, immune) == 0
+    over = make_enemy(negation=150)  # never negative, even with odd data
+    assert direct_damage(values, over) == 0
 
 
 def test_parse_cycle():
