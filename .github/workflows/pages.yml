@@ -1,0 +1,45 @@
+# Builds the web app and publishes it to GitHub Pages on every push to main.
+# The page runs erbuild in the browser (Pyodide), so Pages only serves static files.
+# Enemy data is never deployed: each visitor's browser downloads it from Google.
+name: web app
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      # Don't publish a page built from code that fails its tests.
+      - run: pip install -e ".[dev]"
+      - run: pytest -q
+      - run: python web/build.py
+      - uses: actions/configure-pages@v6
+      - uses: actions/upload-pages-artifact@v5
+        with:
+          path: web
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v5

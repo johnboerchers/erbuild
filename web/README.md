@@ -41,6 +41,13 @@ Files: `index.html` (layout), `style.css` (warm dark theme; the chart colors wer
 checked for lightness, chroma and color-blind separation against the card
 surface), `chart.js` (the SVG frontier chart), `app.js` (wiring).
 
+## Deployment
+
+[`.github/workflows/pages.yml`](../.github/workflows/pages.yml) publishes the app to
+GitHub Pages on every push to `main`: it runs the tests, builds the wheel with
+`web/build.py`, and uploads the `web/` folder. Pages serves static files only, and the
+enemy data is never deployed; each visitor's browser downloads it from Google.
+
 ## Self-test
 
 Open `http://localhost:8000/?selftest`. After loading, the page reads the

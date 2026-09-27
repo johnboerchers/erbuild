@@ -17,8 +17,9 @@ rest of your points:
 - **Damage against a specific enemy:** defenses, damage negation and bleed procs
   for any of 3,254 enemy placements, from NG to NG+7.
 
-Use it from the command line, as a Python library, or in a web app that runs
-entirely in your browser.
+Use it from the command line, as a Python library, or in the
+**[web app](https://johnboerchers.github.io/erbuild/)**, which runs entirely in your
+browser with nothing to install.
 
 ![The erbuild web app optimizing a Blood Uchigatana build against Malenia](docs/images/web-app.png)
 
@@ -184,11 +185,12 @@ values = attack_power(katana, {"str": 12, "dex": dex, "arc": 50}, upgrade=25)
 
 ### In the browser
 
-[`web/`](web/) is a static web app that runs erbuild in your browser through
-[Pyodide](https://pyodide.org). It uses the same Python code as the CLI, with no
-server. It has the optimizer with an interactive AR-vs-bleed chart, the AR
-calculator, and damage against enemies, and a link to the page reproduces the exact
-build. See [web/README.md](web/README.md) to run it locally.
+**Try it at [johnboerchers.github.io/erbuild](https://johnboerchers.github.io/erbuild/).**
+The web app runs erbuild in your browser through [Pyodide](https://pyodide.org): the
+same Python code as the CLI, with no server. It has the optimizer with an interactive
+AR-vs-bleed chart, the AR calculator, and damage against enemies, and a link to the
+page reproduces the exact build. The source is in [`web/`](web/); see
+[web/README.md](web/README.md) to run it locally.
 
 ## How it works
 
