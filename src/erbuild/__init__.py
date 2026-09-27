@@ -31,4 +31,4 @@ __all__ = [
     "update_enemy_data",
 ]
 
-__version__ = "0.3.0"
+__version__ = "1.0.0"
