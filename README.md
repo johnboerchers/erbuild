@@ -34,6 +34,7 @@ entirely in your browser.
 - [Validation](#validation)
 - [Game data](#game-data)
 - [Credits and license](#credits-and-license)
+- [Acknowledgments](#acknowledgments)
 
 ## Install
 
@@ -415,3 +416,9 @@ Enemy data is not included; see [Game data](#game-data).
 
 Elden Ring is a trademark of FromSoftware / Bandai Namco. This is an unofficial fan
 project.
+
+## Acknowledgments
+
+Built with help from [Claude Code](https://claude.com/claude-code), Anthropic's AI
+coding assistant, which assisted with design, implementation, testing and
+documentation.
